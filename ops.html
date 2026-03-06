@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Janaa — Internal Ops</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar" role="complementary" aria-label="Sidebar">
+    <div id="sidebarContent"></div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main-content">
+    <header class="topbar">
+      <button class="mobile-menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')"
+              aria-label="Toggle menu" aria-expanded="false">☰</button>
+      <div class="topbar-title">Operations Dashboard</div>
+      <div class="topbar-period" id="periodLabel">📅 May 2025</div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary btn-sm" onclick="loadData()" id="refreshBtn">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" onclick="Modal.open('newRunModal')">+ New Run</button>
+      </div>
+    </header>
+    <main class="page-content" id="pageContent" role="main"></main>
+  </div>
+</div>
+
+<!-- NEW RUN MODAL -->
+<div class="modal-overlay" id="newRunModal" role="dialog" aria-modal="true" aria-labelledby="newRunTitle">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="newRunTitle">🆕 Create New Payroll Run</span>
+      <button class="modal-close" onclick="Modal.close('newRunModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="newRunClient">Client</label>
+        <select class="form-select" id="newRunClient">
+          <option value="CLIENT01">TechCorp India 🇮🇳</option>
+          <option value="CLIENT02">GlobalOps PH 🇵🇭</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="newRunPeriod">Period</label>
+        <input class="form-input" type="month" id="newRunPeriod" value="2025-06">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="newRunPayDate">Payment Date</label>
+        <input class="form-input" type="date" id="newRunPayDate" value="2025-06-30">
+      </div>
+      <div class="alert alert-info">
+        <span class="alert-icon">ℹ</span>
+        <div class="alert-body">A new run will be created in <strong>draft</strong> status.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close('newRunModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createRun()" id="createRunBtn">Create Run</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXCEPTION MODAL -->
+<div class="modal-overlay" id="exceptionModal" role="dialog" aria-modal="true" aria-labelledby="exModalTitle">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" id="exModalTitle">Exception Detail</span>
+      <button class="modal-close" onclick="Modal.close('exceptionModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="exModalBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close('exceptionModal')">Close</button>
+      <button class="btn btn-success" id="exResolveBtn">✓ Mark Resolved</button>
+    </div>
+  </div>
+</div>
+
+<!-- COMPLIANCE TASK MODAL -->
+<div class="modal-overlay" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" id="taskModalTitle">Compliance Task</span>
+      <button class="modal-close" onclick="Modal.close('taskModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="taskModalBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close('taskModal')">Close</button>
+      <button class="btn btn-success" id="taskDoneBtn">✓ Mark Done</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/utils.js"></script>
+<script>
+'use strict';
+
+/* ── AUTH ── */
+const user = Session.require(['ops']);
+if (!user) { /* redirect handled inside Session.require */ }
+
+/* ── STATE ── */
+let allRuns      = [];
+let allExceptions= [];
+let allTasks     = [];
+let allEmployees = [];
+let currentTab   = 'overview';
+let isLoading    = false;
+
+/* ── NAV TAB SWITCHER ── */
+function switchTab(id) {
+  const validTabs = ['overview','runs','exceptions','compliance'];
+  if (!validTabs.includes(id)) return;
+  currentTab = id;
+  // Update active nav item
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.navId === id);
+  });
+  renderPage();
+}
+
+/* ── SIDEBAR ── */
+function renderSidebar() {
+  const openEx       = allExceptions.filter(e => e.status === 'open').length;
+  const blockerTasks = allTasks.filter(t => t.is_blocker && t.status !== 'done').length;
+  const activeRuns   = allRuns.filter(r => ['draft','processing','pending_approval'].includes(r.status)).length;
+
+  const nav = [
+    { type: 'section', label: 'Work Queue' },
+    { id: 'overview',   href: '#', icon: '⊞', label: 'Overview' },
+    { id: 'runs',       href: '#', icon: '▶', label: 'Payroll Runs',     badge: activeRuns   || '' },
+    { id: 'exceptions', href: '#', icon: '⚠', label: 'Exceptions Inbox', badge: openEx       || '' },
+    { id: 'compliance', href: '#', icon: '✅', label: 'Compliance Tasks', badge: blockerTasks || '' },
+    { type: 'section', label: 'Reports' },
+    { id: 'register',   href: 'register.html', icon: '📋', label: 'Payroll Register' },
+    { type: 'section', label: 'Switch View' },
+    { id: 'switch-view', href: 'index.html', icon: '↩', label: 'Switch Role' },
+  ];
+
+  document.getElementById('sidebarContent').innerHTML = buildSidebar({
+    name: user.name, email: user.email, role: user.role,
+    navItems: nav, activePage: currentTab
+  });
+
+  // Use delegated nav handler from utils
+  initSidebarNav(switchTab);
+}
+
+/* ── LOAD DATA ── */
+async function loadData() {
+  if (isLoading) return;
+  isLoading = true;
+  const btn = document.getElementById('refreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ …'; }
+  Loading.show('pageContent', 'Loading operations data…');
+
+  try {
+    const [runsRes, exRes, tasksRes, empRes] = await Promise.all([
+      API.get('payroll_runs',     { limit: 100 }),
+      API.get('exceptions',       { limit: 100 }),
+      API.get('compliance_tasks', { limit: 100 }),
+      API.get('employees',        { limit: 100 }),
+    ]);
+
+    allRuns       = runsRes?.data  || [];
+    allExceptions = exRes?.data    || [];
+    allTasks      = tasksRes?.data || [];
+    allEmployees  = empRes?.data   || [];
+
+    renderSidebar();
+    renderPage();
+  } catch (err) {
+    console.error('loadData error:', err);
+    Loading.error('pageContent', err.message || 'Failed to load data.', loadData);
+    Toast.error('Failed to load data — check your connection.');
+  } finally {
+    isLoading = false;
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+  }
+}
+
+/* ── RENDER PAGE ── */
+function renderPage() {
+  const content = document.getElementById('pageContent');
+  if (!content) return;
+  try {
+    if (currentTab === 'overview')   content.innerHTML = renderOverview();
+    else if (currentTab === 'runs')       content.innerHTML = renderRuns();
+    else if (currentTab === 'exceptions') content.innerHTML = renderExceptions();
+    else if (currentTab === 'compliance') content.innerHTML = renderCompliance();
+    // Re-init tabs after innerHTML change
+    initTabs(content);
+  } catch (err) {
+    console.error('renderPage error:', err);
+    Loading.error('pageContent', 'Failed to render this view.', loadData);
+  }
+}
+
+/* ── OVERVIEW ── */
+function renderOverview() {
+  const activeRuns = allRuns.filter(r => ['processing','pending_approval','draft'].includes(r.status));
+  const openEx     = allExceptions.filter(e => e.status === 'open');
+  const totalHeads = allEmployees.filter(e => e.status === 'active').length;
+  const blockers   = allTasks.filter(t => t.is_blocker && t.status !== 'done');
+
+  const stats = `
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#EEF2FF;font-size:1.1rem">▶</div>
+        <div class="stat-info">
+          <div class="stat-label">Active Runs</div>
+          <div class="stat-value">${activeRuns.length}</div>
+          <div class="stat-sub">${allRuns.filter(r=>r.status==='paid').length} paid this cycle</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#FEF2F2;font-size:1.1rem">⚠</div>
+        <div class="stat-info">
+          <div class="stat-label">Open Exceptions</div>
+          <div class="stat-value" style="color:${openEx.length > 0 ? 'var(--danger)' : 'inherit'}">${openEx.length}</div>
+          <div class="stat-sub ${openEx.length > 0 ? 'negative' : ''}">${openEx.filter(e=>e.severity==='high').length} high severity</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#ECFDF5;font-size:1.1rem">👥</div>
+        <div class="stat-info">
+          <div class="stat-label">Active Employees</div>
+          <div class="stat-value">${totalHeads}</div>
+          <div class="stat-sub">🇮🇳 ${allEmployees.filter(e=>e.country==='India'&&e.status==='active').length} &bull; 🇵🇭 ${allEmployees.filter(e=>e.country==='Philippines'&&e.status==='active').length}</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#FFFBEB;font-size:1.1rem">✅</div>
+        <div class="stat-info">
+          <div class="stat-label">Compliance Tasks</div>
+          <div class="stat-value">${allTasks.length}</div>
+          <div class="stat-sub ${blockers.length > 0 ? 'negative' : 'positive'}">${blockers.length} blocking &bull; ${allTasks.filter(t=>t.status==='done').length} done</div>
+        </div>
+      </div>
+    </div>`;
+
+  const upcomingRuns = allRuns
+    .filter(r => ['draft','processing','pending_approval'].includes(r.status))
+    .sort((a,b) => new Date(a.due_date||0) - new Date(b.due_date||0));
+
+  const deadlinesHtml = upcomingRuns.length
+    ? upcomingRuns.map(r => `
+        <tr>
+          <td class="td-primary">${fmt.escapeHtml(r.run_name)}</td>
+          <td>${countryFlag(r.country)} ${fmt.escapeHtml(r.country)}</td>
+          <td>${statusBadge(r.status)}</td>
+          <td>${fmt.date(r.approval_deadline)} ${dueLabel(r.approval_deadline)}</td>
+          <td>${fmt.date(r.payment_date)}</td>
+          <td class="td-right td-mono">${fmt.currency(r.total_gross||0, r.currency)}</td>
+          <td class="td-right">
+            <button class="btn btn-secondary btn-xs" onclick="switchTab('runs')">View →</button>
+          </td>
+        </tr>`).join('')
+    : `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--gray-400)">No active runs — all caught up! 🎉</td></tr>`;
+
+  const critEx = allExceptions.filter(e => e.status === 'open').slice(0, 3);
+  const exHtml = critEx.length
+    ? critEx.map(e => exceptionItem(e)).join('')
+    : `<div class="empty-state"><div class="empty-icon">✅</div><h3>No open exceptions</h3></div>`;
+
+  const tasksByCountry = {
+    India:       allTasks.filter(t => t.country === 'India'),
+    Philippines: allTasks.filter(t => t.country === 'Philippines'),
+  };
+
+  const complianceHtml = Object.entries(tasksByCountry).map(([country, tasks]) => {
+    const done  = tasks.filter(t => t.status === 'done').length;
+    const total = tasks.length;
+    const pct   = total ? Math.round((done / total) * 100) : 0;
+    const color = country === 'India' ? 'var(--primary)' : 'var(--accent)';
+    return `
+      <div style="margin-bottom:16px">
+        <div class="flex-between mb-8">
+          <span style="font-weight:600;font-size:.88rem">${countryFlag(country)} ${country}</span>
+          <span style="font-size:.8rem;color:var(--gray-500)">${done}/${total} tasks done</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+          ${tasks.map(t => `
+            <button class="badge ${t.status==='done'?'badge-green':t.status==='blocked'?'badge-red':t.status==='in_progress'?'badge-blue':'badge-gray'}"
+                    title="${fmt.escapeHtml(t.title)}" style="cursor:pointer;border:none"
+                    onclick="openTask('${t.id}')">
+              ${fmt.escapeHtml(t.regulatory_body)}
+            </button>`).join('')}
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    ${blockers.length > 0 ? `
+      <div class="alert alert-danger" role="alert">
+        <span class="alert-icon">🚨</span>
+        <div class="alert-body">
+          <div class="alert-title">${blockers.length} compliance task${blockers.length > 1 ? 's are' : ' is'} blocking payroll</div>
+          ${blockers.map(b => `<div>${countryFlag(b.country)} <strong>${fmt.escapeHtml(b.regulatory_body)}</strong> — ${fmt.escapeHtml(b.title)}</div>`).join('')}
+        </div>
+      </div>` : ''}
+    ${stats}
+    <div class="grid-2-1">
+      <div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">🗓 Upcoming Deadlines</span>
+            <button class="btn btn-secondary btn-sm" onclick="switchTab('runs')">All Runs →</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead><tr>
+                <th>Run</th><th>Country</th><th>Status</th>
+                <th>Approval By</th><th>Pay Date</th><th class="td-right">Gross</th><th></th>
+              </tr></thead>
+              <tbody>${deadlinesHtml}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">⚠ Open Exceptions (${openEx.length})</span>
+            <button class="btn btn-secondary btn-sm" onclick="switchTab('exceptions')">All →</button>
+          </div>
+          <div class="card-body">${exHtml}</div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">✅ Compliance Progress</span></div>
+          <div class="card-body">${complianceHtml}</div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">📊 Run Summary</span></div>
+          <div class="card-body">
+            ${['draft','processing','pending_approval','approved','paid','failed'].map(s => {
+              const count = allRuns.filter(r => r.status === s).length;
+              if (!count) return '';
+              return `<div class="flex-between" style="margin-bottom:10px">
+                <span>${statusBadge(s)}</span>
+                <span style="font-weight:700">${count} run${count > 1 ? 's' : ''}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ── RUNS TAB ── */
+function renderRuns() {
+  const sorted = [...allRuns].sort((a,b) => (b.due_date||'').localeCompare(a.due_date||''));
+  if (!sorted.length) {
+    return `<h2 style="margin-bottom:16px">▶ Payroll Runs</h2>
+      <div class="card"><div class="card-body"><div class="empty-state">
+        <div class="empty-icon">📋</div><h3>No payroll runs yet</h3>
+        <p>Create your first run using the button above.</p>
+      </div></div></div>`;
+  }
+  return `
+    <h2 style="margin-bottom:16px">▶ Payroll Runs</h2>
+    <div class="card">
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th>Run</th><th>Country</th><th>Period</th><th>Status</th>
+            <th class="td-right">HC</th><th class="td-right">Gross</th><th class="td-right">Net</th>
+            <th>Approval By</th><th>Pay Date</th><th>Exceptions</th><th>Owner</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${sorted.map(r => `
+              <tr>
+                <td class="td-primary">${fmt.escapeHtml(r.run_name)}</td>
+                <td>${countryFlag(r.country)} ${fmt.escapeHtml(r.country)}</td>
+                <td>${fmt.period(r.period)}</td>
+                <td>${statusBadge(r.status)}</td>
+                <td class="td-right">${r.headcount || 0}</td>
+                <td class="td-right td-mono">${fmt.currencyFull(r.total_gross||0, r.currency)}</td>
+                <td class="td-right td-mono">${fmt.currencyFull(r.total_net||0, r.currency)}</td>
+                <td>${fmt.date(r.approval_deadline)} ${dueLabel(r.approval_deadline)}</td>
+                <td>${fmt.date(r.payment_date)}</td>
+                <td class="td-center">
+                  ${(r.exceptions_count||0) > 0
+                    ? `<button class="badge badge-red" style="border:none;cursor:pointer" onclick="switchTab('exceptions')">${r.exceptions_count} open</button>`
+                    : '<span class="badge badge-green">Clean</span>'}
+                </td>
+                <td>${fmt.escapeHtml(r.ops_owner||'—')}</td>
+                <td style="white-space:nowrap">
+                  ${r.status==='pending_approval' ? `<button class="btn btn-success btn-xs" onclick="approveRun('${r.id}')">✓ Approve</button> ` : ''}
+                  ${r.status==='draft'            ? `<button class="btn btn-primary btn-xs" onclick="startProcessing('${r.id}')">▶ Process</button> ` : ''}
+                  ${r.status==='approved'         ? `<button class="btn btn-primary btn-xs" onclick="markPaid('${r.id}')">💸 Mark Paid</button> ` : ''}
+                  <a href="register.html?run=${r.id}" class="btn btn-secondary btn-xs">📋</a>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+/* ── EXCEPTIONS TAB ── */
+function renderExceptions() {
+  const openEx     = allExceptions.filter(e => e.status === 'open');
+  const resolvedEx = allExceptions.filter(e => e.status === 'resolved');
+  const renderList = (list, empty) => list.length
+    ? list.map(e => exceptionItem(e, true)).join('')
+    : `<div class="empty-state"><div class="empty-icon">✅</div><p>${empty}</p></div>`;
+
+  return `
+    <h2 style="margin-bottom:16px">⚠ Exceptions Inbox</h2>
+    <div class="tab-scope">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="open-ex">Open (${openEx.length})</button>
+        <button class="tab-btn" data-tab="resolved-ex">Resolved (${resolvedEx.length})</button>
+      </div>
+      <div id="tab-open-ex"     class="tab-panel active">${renderList(openEx,     'No open exceptions — nice!')}</div>
+      <div id="tab-resolved-ex" class="tab-panel">${renderList(resolvedEx, 'No resolved exceptions yet')}</div>
+    </div>`;
+}
+
+/* ── COMPLIANCE TAB ── */
+function renderCompliance() {
+  const indiaT = allTasks.filter(t => t.country === 'India');
+  const philT  = allTasks.filter(t => t.country === 'Philippines');
+
+  const taskList = (tasks) => tasks.length
+    ? `<div class="checklist">${tasks.map(t => {
+        const stateClass = { done:'done', blocked:'blocked', in_progress:'active', pending:'' }[t.status] || '';
+        const icon       = { done:'✓', blocked:'✗', in_progress:'⚙', pending:'' }[t.status] || '';
+        return `
+          <div class="check-item ${stateClass}" style="cursor:pointer" onclick="openTask('${t.id}')">
+            <div class="check-toggle" aria-hidden="true">${icon}</div>
+            <div class="check-content">
+              <div class="check-title">${t.is_blocker ? '🚨 ' : ''}${fmt.escapeHtml(t.title)}</div>
+              <div class="check-desc">${fmt.escapeHtml(t.description)}</div>
+              <div class="check-meta">
+                ${statusBadge(t.status)}
+                <span class="badge badge-gray">${fmt.escapeHtml(t.regulatory_body)}</span>
+                ${dueLabel(t.due_date)}
+                <span style="font-size:.75rem;color:var(--gray-400)">→ ${fmt.escapeHtml(t.assigned_to||'Unassigned')}</span>
+              </div>
+            </div>
+            ${t.status !== 'done'
+              ? `<button class="btn btn-success btn-xs" onclick="event.stopPropagation();markTaskDone('${t.id}')">✓</button>`
+              : ''}
+          </div>`;
+      }).join('')}</div>`
+    : `<div class="empty-state"><div class="empty-icon">📋</div><p>No tasks for this country yet.</p></div>`;
+
+  return `
+    <h2 style="margin-bottom:16px">✅ Compliance Tasks</h2>
+    <div class="grid-2">
+      <div>
+        <div class="card">
+          <div class="card-header">
+            <span style="font-size:1.2rem" aria-hidden="true">🇮🇳</span>
+            <span class="card-title">India Compliance Checklist</span>
+            <span class="badge badge-gray">${indiaT.filter(t=>t.status==='done').length}/${indiaT.length}</span>
+          </div>
+          <div class="card-body">
+            <div class="alert alert-info" style="margin-bottom:16px">
+              <span class="alert-icon">ℹ</span>
+              <div class="alert-body">
+                <div class="alert-title">Statutory Bodies</div>
+                PF (EPFO) · ESI (ESIC) · PT (State) · TDS (Income Tax)
+              </div>
+            </div>
+            ${taskList(indiaT)}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-header">
+            <span style="font-size:1.2rem" aria-hidden="true">🇵🇭</span>
+            <span class="card-title">Philippines Compliance Checklist</span>
+            <span class="badge badge-gray">${philT.filter(t=>t.status==='done').length}/${philT.length}</span>
+          </div>
+          <div class="card-body">
+            <div class="alert alert-info" style="margin-bottom:16px">
+              <span class="alert-icon">ℹ</span>
+              <div class="alert-body">
+                <div class="alert-title">Statutory Bodies</div>
+                SSS · PhilHealth · Pag-IBIG (HDMF) · BIR Withholding Tax
+              </div>
+            </div>
+            ${taskList(philT)}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ── EXCEPTION ITEM TEMPLATE ── */
+function exceptionItem(e, showInlineResolve = false) {
+  const iconMap = { missing_bank:'🏦', salary_change:'💰', tax_mismatch:'🧾', payment_failed:'💳', late_data:'📅', new_joiner:'👤' };
+  const icon = iconMap[e.type] || '⚠';
+  return `
+    <div class="exception-item sev-${e.severity}" style="cursor:pointer" onclick="openException('${e.id}')">
+      <div class="exception-icon" style="background:${e.severity==='high'?'var(--danger-light)':'var(--warning-light)'}">
+        ${icon}
+      </div>
+      <div class="exception-body">
+        <div class="exception-title">${fmt.escapeHtml(e.title)}</div>
+        <div class="exception-desc">${fmt.escapeHtml((e.description||'').substring(0,120))}${(e.description||'').length>120?'…':''}</div>
+        <div class="exception-footer">
+          ${severityBadge(e.severity)}
+          <span class="badge badge-gray">${fmt.escapeHtml((e.type||'').replace(/_/g,' '))}</span>
+          <span class="badge badge-gray">Owner: ${fmt.escapeHtml(e.action_owner||'')}</span>
+          ${countryFlag(e.country)}
+          <span style="font-size:.75rem;color:var(--gray-400)">${fmt.date(e.raised_date)}</span>
+        </div>
+      </div>
+      ${showInlineResolve && e.status === 'open'
+        ? `<button class="btn btn-success btn-xs" style="flex-shrink:0;align-self:center"
+                   onclick="event.stopPropagation();resolveException('${e.id}')">✓ Resolve</button>`
+        : ''}
+    </div>`;
+}
+
+/* ── MODALS ── */
+function openException(id) {
+  const ex = allExceptions.find(e => e.id === id);
+  if (!ex) return;
+  document.getElementById('exModalTitle').textContent = ex.title;
+  document.getElementById('exModalBody').innerHTML = `
+    <div class="flex-gap-12" style="margin-bottom:16px;flex-wrap:wrap">
+      ${severityBadge(ex.severity)} ${statusBadge(ex.status)}
+      <span class="badge badge-gray">${fmt.escapeHtml((ex.type||'').replace(/_/g,' '))}</span>
+      ${countryFlag(ex.country)}
+    </div>
+    <p style="margin-bottom:12px;color:var(--gray-700);line-height:1.6">${fmt.escapeHtml(ex.description)}</p>
+    <div style="background:var(--gray-50);border-radius:8px;padding:12px;font-size:.83rem">
+      ${[
+        ['Employee',     ex.employee_name],
+        ['Country',      `${countryFlag(ex.country)} ${ex.country}`],
+        ['Action Owner', ex.action_owner],
+        ['Raised',       fmt.date(ex.raised_date)],
+      ].map(([k,v]) => `<div class="flex-between mb-8"><span class="color-muted">${k}</span><strong>${fmt.escapeHtml(String(v||'—'))}</strong></div>`).join('')}
+    </div>`;
+  const btn = document.getElementById('exResolveBtn');
+  btn.style.display = ex.status === 'resolved' ? 'none' : '';
+  btn.onclick = () => resolveException(id);
+  Modal.open('exceptionModal');
+}
+
+async function resolveException(id) {
+  try {
+    await API.patch('exceptions', id, { status: 'resolved' });
+    Modal.closeAll();
+    Toast.success('Exception marked as resolved ✓');
+    await loadData();
+  } catch(err) {
+    Toast.error('Failed to resolve exception: ' + (err.message || ''));
+  }
+}
+
+function openTask(id) {
+  const t = allTasks.find(t => t.id === id);
+  if (!t) return;
+  document.getElementById('taskModalTitle').textContent = t.title;
+  document.getElementById('taskModalBody').innerHTML = `
+    <div class="flex-gap-12" style="margin-bottom:16px;flex-wrap:wrap">
+      ${statusBadge(t.status)}
+      <span class="badge badge-gray">${fmt.escapeHtml(t.regulatory_body)}</span>
+      ${countryFlag(t.country)}
+      ${t.is_blocker ? '<span class="badge badge-red">🚨 Blocker</span>' : ''}
+    </div>
+    <p style="margin-bottom:12px;color:var(--gray-700);line-height:1.6">${fmt.escapeHtml(t.description)}</p>
+    <div style="background:var(--gray-50);border-radius:8px;padding:12px;font-size:.83rem;margin-bottom:16px">
+      ${[
+        ['Regulatory Body', t.regulatory_body],
+        ['Assigned To',     t.assigned_to],
+        ['Due Date',        fmt.date(t.due_date)],
+      ].map(([k,v]) => `<div class="flex-between mb-8"><span class="color-muted">${k}</span><strong>${fmt.escapeHtml(String(v||'—'))}</strong></div>`).join('')}
+      ${t.notes ? `<div class="flex-between"><span class="color-muted">Notes</span><span style="max-width:280px;text-align:right">${fmt.escapeHtml(t.notes)}</span></div>` : ''}
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="taskStatusSelect">Update Status</label>
+      <select class="form-select" id="taskStatusSelect">
+        ${['pending','in_progress','done','blocked'].map(s =>
+          `<option value="${s}" ${s === t.status ? 'selected' : ''}>${s.replace(/_/g,' ')}</option>`
+        ).join('')}
+      </select>
+    </div>`;
+  const btn = document.getElementById('taskDoneBtn');
+  btn.style.display = t.status === 'done' ? 'none' : '';
+  btn.onclick = () => updateTaskStatus(id);
+  Modal.open('taskModal');
+}
+
+async function updateTaskStatus(id) {
+  const sel = document.getElementById('taskStatusSelect');
+  const newStatus = sel ? sel.value : 'done';
+  try {
+    await API.patch('compliance_tasks', id, { status: newStatus });
+    Modal.closeAll();
+    Toast.success(`Task updated to "${newStatus.replace(/_/g,' ')}"`);
+    await loadData();
+  } catch(err) {
+    Toast.error('Failed to update task: ' + (err.message || ''));
+  }
+}
+
+async function markTaskDone(id) {
+  try {
+    await API.patch('compliance_tasks', id, { status: 'done' });
+    Toast.success('Task marked as done ✓');
+    await loadData();
+  } catch(err) {
+    Toast.error('Failed to update task: ' + (err.message || ''));
+  }
+}
+
+/* ── RUN ACTIONS ── */
+function approveRun(id) {
+  const run = allRuns.find(r => r.id === id);
+  if (!run) return;
+  janaaConfirm(`Approve "${run.run_name}"? This will allow payments to proceed.`, async () => {
+    try {
+      await API.patch('payroll_runs', id, { status: 'approved' });
+      Toast.success('Payroll run approved ✓');
+      await loadData();
+    } catch(err) {
+      Toast.error('Failed to approve run: ' + (err.message || ''));
+    }
+  });
+}
+
+function startProcessing(id) {
+  const run = allRuns.find(r => r.id === id);
+  if (!run) return;
+  janaaConfirm(`Start processing "${run.run_name}"?`, async () => {
+    try {
+      await API.patch('payroll_runs', id, { status: 'processing' });
+      Toast.info('Run moved to processing…');
+      await loadData();
+    } catch(err) {
+      Toast.error('Failed to update run: ' + (err.message || ''));
+    }
+  });
+}
+
+function markPaid(id) {
+  const run = allRuns.find(r => r.id === id);
+  if (!run) return;
+  janaaConfirm(`Mark "${run.run_name}" as fully paid?`, async () => {
+    try {
+      await API.patch('payroll_runs', id, { status: 'paid' });
+      Toast.success('Run marked as paid 💸');
+      await loadData();
+    } catch(err) {
+      Toast.error('Failed to update run: ' + (err.message || ''));
+    }
+  });
+}
+
+async function createRun() {
+  const btn = document.getElementById('createRunBtn');
+  const client  = document.getElementById('newRunClient')?.value;
+  const period  = document.getElementById('newRunPeriod')?.value;
+  const payDate = document.getElementById('newRunPayDate')?.value;
+
+  if (!client || !period || !payDate) { Toast.error('Please fill all fields'); return; }
+
+  const clientName = client === 'CLIENT01' ? 'TechCorp India' : 'GlobalOps PH';
+  const country    = client === 'CLIENT01' ? 'India' : 'Philippines';
+  const currency   = client === 'CLIENT01' ? 'INR' : 'PHP';
+  const [y, m] = period.split('-');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const runName = `${clientName} — ${months[parseInt(m,10)-1]} ${y}`;
+
+  // Check for duplicate
+  const dup = allRuns.find(r => r.client_id === client && r.period === period);
+  if (dup) { Toast.warning(`A run for ${clientName} ${fmt.period(period)} already exists.`); return; }
+
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    await API.post('payroll_runs', {
+      id: 'RUN-' + Date.now(),
+      run_name: runName, country, client_id: client, client_name: clientName,
+      period, currency, status: 'draft',
+      headcount: 0, total_gross: 0, total_net: 0, total_employer_cost: 0,
+      exceptions_count: 0, payment_date: payDate,
+      approval_deadline: payDate, due_date: payDate,
+      ops_owner: user.name
+    });
+    Modal.closeAll();
+    Toast.success(`"${runName}" created in draft ✓`);
+    switchTab('runs');
+    await loadData();
+  } catch(err) {
+    Toast.error('Failed to create run: ' + (err.message || ''));
+  } finally {
+    btn.disabled = false; btn.textContent = 'Create Run';
+  }
+}
+
+/* ── INIT ── */
+loadData();
+</script>
+</body>
+</html>

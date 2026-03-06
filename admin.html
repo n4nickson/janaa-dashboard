@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Janaa — Client Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar" role="complementary" aria-label="Sidebar">
+    <div id="sidebarContent"></div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <button class="mobile-menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+      <div class="topbar-title" id="topbarTitle">Employer Dashboard</div>
+      <div class="topbar-period" id="periodLabel">📅 May 2025</div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary btn-sm" onclick="loadData()" id="refreshBtn">↻ Refresh</button>
+        <button class="btn btn-success btn-sm" id="approveAllBtn" onclick="approveAllRuns()" style="display:none">✓ Approve Payroll</button>
+      </div>
+    </header>
+    <main class="page-content" id="pageContent" role="main"></main>
+  </div>
+</div>
+
+<!-- APPROVE MODAL -->
+<div class="modal-overlay" id="approveModal" role="dialog" aria-modal="true" aria-labelledby="approveModalTitle">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" id="approveModalTitle">✓ Approve Payroll Run</span>
+      <button class="modal-close" onclick="Modal.close('approveModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="approveModalBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close('approveModal')">Cancel</button>
+      <button class="btn btn-success" id="approveConfirmBtn">✓ Confirm Approval</button>
+    </div>
+  </div>
+</div>
+
+<!-- EMPLOYEE DETAIL MODAL -->
+<div class="modal-overlay" id="empModal" role="dialog" aria-modal="true" aria-labelledby="empModalTitle">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title" id="empModalTitle">Employee Detail</span>
+      <button class="modal-close" onclick="Modal.close('empModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="empModalBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close('empModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/utils.js"></script>
+<script>
+'use strict';
+
+/* ── AUTH ── */
+const user = Session.require(['admin']);
+if (!user) { /* redirect handled */ }
+
+/* ── STATE ── */
+let allRuns      = [];
+let allPayslips  = [];
+let allEmployees = [];
+let allExceptions= [];
+let currentTab   = 'overview';
+let isLoading    = false;
+let costChart    = null;
+
+/* ── CURRENCY HELPER ── */
+const currency = () => user?.country === 'Philippines' ? 'PHP' : 'INR';
+
+/* ── NAV ── */
+function switchTab(id) {
+  const valid = ['overview','approval','costs','employees','exceptions'];
+  if (!valid.includes(id)) return;
+  currentTab = id;
+  document.querySelectorAll('.nav-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.navId === id)
+  );
+  renderPage();
+}
+
+/* ── SIDEBAR ── */
+function renderSidebar() {
+  const openEx          = allExceptions.filter(e => e.status === 'open').length;
+  const pendingApproval = allRuns.filter(r => r.status === 'pending_approval').length;
+  const nav = [
+    { type: 'section', label: 'Payroll' },
+    { id: 'overview',   href: '#', icon: '⊞', label: 'Overview' },
+    { id: 'approval',   href: '#', icon: '✓', label: 'Approval',       badge: pendingApproval || '' },
+    { id: 'costs',      href: '#', icon: '💰', label: 'Cost Summary' },
+    { id: 'employees',  href: '#', icon: '👥', label: 'Employees' },
+    { id: 'exceptions', href: '#', icon: '⚠', label: 'Blockers',       badge: openEx || '' },
+    { type: 'section', label: 'Reports' },
+    { id: 'register',   href: 'register.html', icon: '📋', label: 'Payroll Register' },
+    { type: 'section', label: 'Account' },
+    { id: 'switch-view',href: 'index.html', icon: '↩', label: 'Switch Role' },
+  ];
+  document.getElementById('sidebarContent').innerHTML = buildSidebar({
+    name: user.name, email: user.email, role: user.role,
+    navItems: nav, activePage: currentTab
+  });
+  initSidebarNav(switchTab);
+}
+
+/* ── LOAD DATA ── */
+async function loadData() {
+  if (isLoading) return;
+  isLoading = true;
+  const btn = document.getElementById('refreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ …'; }
+  Loading.show('pageContent', 'Loading your payroll data…');
+
+  try {
+    const [runsRes, psRes, empRes, exRes] = await Promise.all([
+      API.get('payroll_runs', { limit: 100 }),
+      API.get('payslips',     { limit: 100 }),
+      API.get('employees',    { limit: 100 }),
+      API.get('exceptions',   { limit: 100 }),
+    ]);
+
+    allRuns       = (runsRes?.data || []).filter(r => r.client_id === user.client_id);
+    allPayslips   = (psRes?.data   || []).filter(p => p.client_id === user.client_id);
+    allEmployees  = (empRes?.data  || []).filter(e => e.client_id === user.client_id);
+    allExceptions = (exRes?.data   || []).filter(e => e.client_id === user.client_id);
+
+    const pendingRuns = allRuns.filter(r => r.status === 'pending_approval');
+    const approveBtn  = document.getElementById('approveAllBtn');
+    if (approveBtn) approveBtn.style.display = pendingRuns.length ? '' : 'none';
+
+    renderSidebar();
+    renderPage();
+  } catch(err) {
+    console.error('loadData error:', err);
+    Loading.error('pageContent', err.message || 'Failed to load data.', loadData);
+    Toast.error('Failed to load data — please refresh.');
+  } finally {
+    isLoading = false;
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+  }
+}
+
+/* ── RENDER PAGE ── */
+function renderPage() {
+  const c = document.getElementById('pageContent');
+  if (!c) return;
+  try {
+    if      (currentTab === 'overview')   c.innerHTML = renderOverview();
+    else if (currentTab === 'approval')   c.innerHTML = renderApproval();
+    else if (currentTab === 'costs')      { c.innerHTML = renderCosts(); initCostChart(); }
+    else if (currentTab === 'employees')  c.innerHTML = renderEmployees();
+    else if (currentTab === 'exceptions') c.innerHTML = renderExceptions();
+    initTabs(c);
+  } catch(err) {
+    console.error('renderPage error:', err);
+    Loading.error('pageContent', 'Failed to render this view.', loadData);
+  }
+}
+
+/* ── OVERVIEW ── */
+function renderOverview() {
+  const cur = currency();
+  const currentRun  = allRuns.find(r => ['pending_approval','processing','draft'].includes(r.status));
+  const openEx      = allExceptions.filter(e => e.status === 'open');
+  const totalHeads  = allEmployees.filter(e => e.status === 'active').length;
+  const totalCost   = currentRun ? (currentRun.total_gross||0) + (currentRun.total_employer_cost||0) : 0;
+
+  const stats = `
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#ECFDF5;font-size:1.1rem">👥</div>
+        <div class="stat-info">
+          <div class="stat-label">Active Employees</div>
+          <div class="stat-value">${totalHeads}</div>
+          <div class="stat-sub">${allEmployees.filter(e=>e.status==='onboarding').length} onboarding</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#EEF2FF;font-size:1.1rem">💰</div>
+        <div class="stat-info">
+          <div class="stat-label">Total Employer Cost</div>
+          <div class="stat-value">${fmt.currency(totalCost, cur)}</div>
+          <div class="stat-sub">${currentRun ? 'Current cycle' : 'No active run'}</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:${openEx.length?'var(--danger-light)':'var(--success-light)'};font-size:1.1rem">⚠</div>
+        <div class="stat-info">
+          <div class="stat-label">Open Blockers</div>
+          <div class="stat-value" style="color:${openEx.length?'var(--danger)':'var(--success)'}">${openEx.length}</div>
+          <div class="stat-sub">${openEx.filter(e=>e.severity==='high').length} high severity</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#FFFBEB;font-size:1.1rem">▶</div>
+        <div class="stat-info">
+          <div class="stat-label">Current Run</div>
+          <div style="margin-top:6px">${currentRun ? statusBadge(currentRun.status) : '<span class="badge badge-gray">None</span>'}</div>
+          <div class="stat-sub">${currentRun ? fmt.escapeHtml(currentRun.run_name) : '—'}</div>
+        </div>
+      </div>
+    </div>`;
+
+  return `
+    ${openEx.length > 0 ? `
+      <div class="alert alert-warning" role="alert">
+        <span class="alert-icon">⚠</span>
+        <div class="alert-body">
+          <div class="alert-title">${openEx.length} blocker${openEx.length>1?'s':''} need your attention</div>
+          ${openEx.map(e => `<div><strong>${fmt.escapeHtml(e.employee_name)}</strong> — ${fmt.escapeHtml(e.title)}</div>`).join('')}
+        </div>
+        <button class="btn btn-warning btn-sm" onclick="switchTab('exceptions')">View →</button>
+      </div>` : ''}
+    ${currentRun?.status === 'pending_approval' ? `
+      <div class="alert alert-info" role="alert">
+        <span class="alert-icon">✅</span>
+        <div class="alert-body">
+          <div class="alert-title">${fmt.escapeHtml(currentRun.run_name)} is ready for your approval</div>
+          Approval deadline: ${fmt.date(currentRun.approval_deadline)} ${dueLabel(currentRun.approval_deadline)}
+        </div>
+        <button class="btn btn-success btn-sm" onclick="openApproveModal('${currentRun.id}')">Approve Now →</button>
+      </div>` : ''}
+    ${stats}
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">📋 Current Payroll — ${currentRun ? fmt.period(currentRun.period) : 'N/A'}</span>
+          ${currentRun ? `<a href="register.html?run=${currentRun.id}" class="btn btn-secondary btn-sm">📋 Register</a>` : ''}
+        </div>
+        <div class="card-body">
+          ${currentRun ? `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+              ${[
+                ['Gross Pay',       fmt.currencyFull(currentRun.total_gross||0, cur)],
+                ['Net Pay',         fmt.currencyFull(currentRun.total_net||0, cur)],
+                ['Employer Cost',   fmt.currencyFull(currentRun.total_employer_cost||0, cur)],
+                ['Headcount',       `${currentRun.headcount||0} employees`],
+              ].map(([l,v]) => `
+                <div style="background:var(--gray-50);border-radius:8px;padding:14px">
+                  <div style="font-size:.7rem;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px">${l}</div>
+                  <div style="font-size:1.15rem;font-weight:700">${v}</div>
+                </div>`).join('')}
+            </div>
+            <div class="flex-between">
+              <div>
+                <div style="font-size:.75rem;color:var(--gray-500)">Payment Date</div>
+                <strong>${fmt.date(currentRun.payment_date)}</strong>
+              </div>
+              ${currentRun.status === 'pending_approval'
+                ? `<button class="btn btn-success" onclick="openApproveModal('${currentRun.id}')">✓ Approve Payroll</button>`
+                : statusBadge(currentRun.status)}
+            </div>` :
+            `<div class="empty-state"><div class="empty-icon">✅</div><p>No active payroll run.</p></div>`}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">📜 Run History</span></div>
+        <div class="table-wrapper">
+          <table>
+            <thead><tr><th>Period</th><th>Status</th><th class="td-right">Gross</th><th>Pay Date</th></tr></thead>
+            <tbody>
+              ${[...allRuns].sort((a,b) => (b.period||'').localeCompare(a.period||'')).map(r => `
+                <tr>
+                  <td class="td-primary">${fmt.period(r.period)}</td>
+                  <td>${statusBadge(r.status)}</td>
+                  <td class="td-right td-mono">${fmt.currencyFull(r.total_gross||0, cur)}</td>
+                  <td>${fmt.date(r.payment_date)}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ── APPROVAL ── */
+function renderApproval() {
+  const cur     = currency();
+  const pending = allRuns.filter(r => r.status === 'pending_approval');
+  const others  = allRuns.filter(r => r.status !== 'pending_approval');
+
+  const pendingHtml = pending.length ? pending.map(r => `
+    <div class="card" style="border-left:4px solid var(--warning)">
+      <div class="card-header">
+        <span style="font-size:1.1rem">⏳</span>
+        <span class="card-title">${fmt.escapeHtml(r.run_name)}</span>
+        ${dueLabel(r.approval_deadline)}
+      </div>
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+          ${[
+            ['Gross Pay',       fmt.currencyFull(r.total_gross||0, cur)],
+            ['Employer Cost',   fmt.currencyFull(r.total_employer_cost||0, cur)],
+            ['Headcount',       `${r.headcount||0} employees`],
+          ].map(([l,v]) => `
+            <div style="background:var(--gray-50);border-radius:8px;padding:12px">
+              <div style="font-size:.7rem;color:var(--gray-500);text-transform:uppercase;margin-bottom:2px">${l}</div>
+              <div style="font-size:1.1rem;font-weight:700">${v}</div>
+            </div>`).join('')}
+        </div>
+        <div class="flex-between">
+          <div style="font-size:.83rem;color:var(--gray-600)">
+            Payment on <strong>${fmt.date(r.payment_date)}</strong> &bull;
+            ${(r.exceptions_count||0) > 0
+              ? `<span class="badge badge-red">${r.exceptions_count} exceptions</span>`
+              : '<span class="badge badge-green">Clean</span>'}
+          </div>
+          <div style="display:flex;gap:8px">
+            <a href="register.html?run=${r.id}" class="btn btn-secondary btn-sm">📋 Review Register</a>
+            <button class="btn btn-success" onclick="openApproveModal('${r.id}')">✓ Approve</button>
+          </div>
+        </div>
+      </div>
+    </div>`).join('') :
+    `<div class="card"><div class="card-body"><div class="empty-state">
+      <div class="empty-icon">✅</div>
+      <h3>Nothing to approve</h3>
+      <p>No runs are pending your approval right now.</p>
+    </div></div></div>`;
+
+  return `
+    <h2 style="margin-bottom:16px">✓ Payroll Approval</h2>
+    ${pendingHtml}
+    ${others.length ? `
+      <h3 style="margin:20px 0 12px;color:var(--gray-600)">Past Runs</h3>
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead><tr><th>Run</th><th>Status</th><th class="td-right">Gross</th><th class="td-right">Net</th><th>Pay Date</th><th></th></tr></thead>
+            <tbody>
+              ${others.map(r => `
+                <tr>
+                  <td class="td-primary">${fmt.escapeHtml(r.run_name)}</td>
+                  <td>${statusBadge(r.status)}</td>
+                  <td class="td-right td-mono">${fmt.currencyFull(r.total_gross||0, cur)}</td>
+                  <td class="td-right td-mono">${fmt.currencyFull(r.total_net||0, cur)}</td>
+                  <td>${fmt.date(r.payment_date)}</td>
+                  <td><a href="register.html?run=${r.id}" class="btn btn-secondary btn-xs">📋</a></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>` : ''}`;
+}
+
+/* ── COSTS ── */
+function renderCosts() {
+  const cur    = currency();
+  const sorted = [...allRuns].filter(r => r.status !== 'draft').sort((a,b) => (a.period||'').localeCompare(b.period||''));
+  return `
+    <h2 style="margin-bottom:16px">💰 Cost Summary</h2>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Monthly Cost Trend</span>
+        <span class="badge badge-gray">${sorted.length} payroll runs</span>
+      </div>
+      <div class="card-body" style="height:280px;position:relative">
+        <canvas id="costChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Cost Breakdown by Run</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportCSV()">↓ Export CSV</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th>Period</th><th class="td-right">Gross Pay</th><th class="td-right">Net Pay</th>
+            <th class="td-right">Deductions</th><th class="td-right">Employer Cost</th>
+            <th class="td-right">Total Cost</th><th>Status</th>
+          </tr></thead>
+          <tbody>
+            ${sorted.map(r => {
+              const ded   = (r.total_gross||0) - (r.total_net||0);
+              const total = (r.total_gross||0) + (r.total_employer_cost||0);
+              return `<tr>
+                <td class="td-primary">${fmt.period(r.period)}</td>
+                <td class="td-right td-mono">${fmt.currencyFull(r.total_gross||0, cur)}</td>
+                <td class="td-right td-mono">${fmt.currencyFull(r.total_net||0, cur)}</td>
+                <td class="td-right td-mono">${fmt.currencyFull(ded, cur)}</td>
+                <td class="td-right td-mono">${fmt.currencyFull(r.total_employer_cost||0, cur)}</td>
+                <td class="td-right td-mono fw-700">${fmt.currencyFull(total, cur)}</td>
+                <td>${statusBadge(r.status)}</td>
+              </tr>`;}).join('')}
+          </tbody>
+          ${sorted.length ? `
+          <tfoot>
+            <tr style="background:var(--gray-50);font-weight:700">
+              <td>Total (${sorted.length} runs)</td>
+              <td class="td-right td-mono">${fmt.currencyFull(sorted.reduce((s,r)=>s+(r.total_gross||0),0), cur)}</td>
+              <td class="td-right td-mono">${fmt.currencyFull(sorted.reduce((s,r)=>s+(r.total_net||0),0), cur)}</td>
+              <td class="td-right td-mono">${fmt.currencyFull(sorted.reduce((s,r)=>s+(r.total_gross||0)-(r.total_net||0),0), cur)}</td>
+              <td class="td-right td-mono">${fmt.currencyFull(sorted.reduce((s,r)=>s+(r.total_employer_cost||0),0), cur)}</td>
+              <td class="td-right td-mono">${fmt.currencyFull(sorted.reduce((s,r)=>s+(r.total_gross||0)+(r.total_employer_cost||0),0), cur)}</td>
+              <td></td>
+            </tr>
+          </tfoot>` : ''}
+        </table>
+      </div>
+    </div>`;
+}
+
+function initCostChart() {
+  setTimeout(() => {
+    const canvas = document.getElementById('costChart');
+    if (!canvas) return;
+    const sorted = [...allRuns].filter(r => r.status !== 'draft').sort((a,b) => (a.period||'').localeCompare(b.period||''));
+    if (costChart) { costChart.destroy(); costChart = null; }
+    costChart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: sorted.map(r => fmt.period(r.period)),
+        datasets: [
+          { label: 'Gross Pay',     data: sorted.map(r => r.total_gross||0),          backgroundColor: 'rgba(27,79,255,.75)',  borderRadius: 5 },
+          { label: 'Employer Cost', data: sorted.map(r => r.total_employer_cost||0),  backgroundColor: 'rgba(16,185,129,.65)', borderRadius: 5 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { grid: { display: false } },
+          y: { grid: { color: '#F3F4F6' }, ticks: { maxTicksLimit: 6 } }
+        }
+      }
+    });
+  }, 80);
+}
+
+/* ── EMPLOYEES ── */
+function renderEmployees() {
+  if (!allEmployees.length) {
+    return `<h2 style="margin-bottom:16px">👥 Employees</h2>
+      <div class="card"><div class="card-body">
+        <div class="empty-state"><div class="empty-icon">👥</div><h3>No employees found</h3></div>
+      </div></div>`;
+  }
+  return `
+    <h2 style="margin-bottom:16px">👥 Employees <span class="badge badge-gray" style="font-size:.8rem;vertical-align:middle">${allEmployees.length}</span></h2>
+    <div class="card">
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>Position</th><th>Department</th>
+            <th class="td-right">Base Salary</th><th>Status</th><th>Bank</th><th>Since</th>
+          </tr></thead>
+          <tbody>
+            ${allEmployees.map(e => `
+              <tr style="cursor:pointer" onclick="openEmployee('${e.id}')" role="button" tabindex="0"
+                  onkeydown="if(event.key==='Enter')openEmployee('${e.id}')">
+                <td>
+                  <div class="flex-gap-8">
+                    <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);
+                                display:flex;align-items:center;justify-content:center;
+                                color:#fff;font-size:.72rem;font-weight:700;flex-shrink:0"
+                         aria-hidden="true">${fmt.initials(e.name)}</div>
+                    <div>
+                      <div class="fw-600">${fmt.escapeHtml(e.name)}</div>
+                      <div style="font-size:.75rem;color:var(--gray-400)">${fmt.escapeHtml(e.email)}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>${fmt.escapeHtml(e.position)}</td>
+                <td>${fmt.escapeHtml(e.department)}</td>
+                <td class="td-right td-mono">${fmt.currencyFull(e.base_salary||0, e.currency)}</td>
+                <td>${statusBadge(e.status)}</td>
+                <td>${e.bank_account
+                  ? `<span class="badge badge-green">✓ ${fmt.escapeHtml(e.bank_name)}</span>`
+                  : '<span class="badge badge-red">⚠ Missing</span>'}</td>
+                <td style="font-size:.8rem;color:var(--gray-500)">${fmt.date(e.start_date)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function openEmployee(id) {
+  const e = allEmployees.find(emp => emp.id === id);
+  if (!e) return;
+  document.getElementById('empModalTitle').textContent = e.name;
+  document.getElementById('empModalBody').innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
+      <div style="width:56px;height:56px;border-radius:50%;background:var(--primary);
+                  display:flex;align-items:center;justify-content:center;color:#fff;
+                  font-size:1.1rem;font-weight:700" aria-hidden="true">${fmt.initials(e.name)}</div>
+      <div>
+        <div style="font-size:1rem;font-weight:700">${fmt.escapeHtml(e.name)}</div>
+        <div style="font-size:.82rem;color:var(--gray-500)">${fmt.escapeHtml(e.position)} · ${fmt.escapeHtml(e.department)}</div>
+        <div style="margin-top:4px">${statusBadge(e.status)}</div>
+      </div>
+    </div>
+    <div style="background:var(--gray-50);border-radius:8px;padding:14px;font-size:.84rem">
+      ${[
+        ['Email',       e.email],
+        ['Country',     `${countryFlag(e.country)} ${e.country}`],
+        ['Base Salary', fmt.currencyFull(e.base_salary||0, e.currency)],
+        ['Bank',        e.bank_account ? `${e.bank_name} — ${e.bank_account}` : '⚠ Not provided'],
+        ['Start Date',  fmt.date(e.start_date)],
+        ['Employee ID', e.id],
+      ].map(([k,v]) => `
+        <div class="flex-between mb-8">
+          <span class="color-muted">${k}</span>
+          <strong style="text-align:right;max-width:260px">${fmt.escapeHtml(String(v||'—'))}</strong>
+        </div>`).join('')}
+    </div>`;
+  Modal.open('empModal');
+}
+
+/* ── EXCEPTIONS / BLOCKERS ── */
+function renderExceptions() {
+  const open = allExceptions.filter(e => e.status === 'open');
+  return `
+    <h2 style="margin-bottom:16px">⚠ Blockers & Exceptions</h2>
+    ${open.length === 0
+      ? `<div class="card"><div class="card-body"><div class="empty-state">
+          <div class="empty-icon">✅</div>
+          <h3>No open blockers</h3>
+          <p>Your payroll is clean — no action needed from you right now.</p>
+        </div></div></div>`
+      : open.map(e => `
+          <div class="exception-item sev-${e.severity}">
+            <div class="exception-icon" style="background:${e.severity==='high'?'var(--danger-light)':'var(--warning-light)'}">
+              ${{missing_bank:'🏦',salary_change:'💰',tax_mismatch:'🧾',payment_failed:'💳',new_joiner:'👤'}[e.type]||'⚠'}
+            </div>
+            <div class="exception-body">
+              <div class="exception-title">${fmt.escapeHtml(e.title)}</div>
+              <div class="exception-desc">${fmt.escapeHtml(e.description)}</div>
+              <div class="exception-footer">
+                ${severityBadge(e.severity)} ${statusBadge(e.status)}
+                <span class="badge badge-gray">Action: ${fmt.escapeHtml(e.action_owner||'')}</span>
+              </div>
+            </div>
+            ${e.action_owner === 'admin'
+              ? `<button class="btn btn-success btn-sm" style="flex-shrink:0;align-self:center"
+                         onclick="resolveEx('${e.id}')">✓ Resolved</button>`
+              : `<span class="badge badge-gray" style="flex-shrink:0;align-self:center">Waiting on ${fmt.escapeHtml(e.action_owner||'')}</span>`}
+          </div>`).join('')}`;
+}
+
+async function resolveEx(id) {
+  try {
+    await API.patch('exceptions', id, { status: 'resolved' });
+    Toast.success('Exception resolved ✓');
+    await loadData();
+  } catch(err) {
+    Toast.error('Failed: ' + (err.message || ''));
+  }
+}
+
+/* ── APPROVE MODAL ── */
+function openApproveModal(runId) {
+  const run = allRuns.find(r => r.id === runId);
+  if (!run) return;
+  const cur = currency();
+  document.getElementById('approveModalBody').innerHTML = `
+    <div class="alert alert-warning" style="margin-bottom:16px" role="alert">
+      <span class="alert-icon">⚠</span>
+      <div class="alert-body">
+        By approving, you confirm the payroll figures are correct and authorize
+        payment on <strong>${fmt.date(run.payment_date)}</strong>.
+      </div>
+    </div>
+    <div style="background:var(--gray-50);border-radius:8px;padding:16px;font-size:.85rem">
+      ${[
+        ['Run',           run.run_name],
+        ['Period',        fmt.period(run.period)],
+        ['Employees',     run.headcount],
+        ['Gross Pay',     fmt.currencyFull(run.total_gross||0, cur)],
+        ['Net Pay',       fmt.currencyFull(run.total_net||0, cur)],
+        ['Employer Cost', fmt.currencyFull(run.total_employer_cost||0, cur)],
+        ['Total Cost',    fmt.currencyFull((run.total_gross||0)+(run.total_employer_cost||0), cur)],
+        ['Payment Date',  fmt.date(run.payment_date)],
+      ].map(([k,v]) => `
+        <div class="flex-between mb-8">
+          <span class="color-muted">${k}</span>
+          <strong>${fmt.escapeHtml(String(v||'—'))}</strong>
+        </div>`).join('')}
+    </div>`;
+
+  const confirmBtn = document.getElementById('approveConfirmBtn');
+  const freshBtn = confirmBtn.cloneNode(true);
+  confirmBtn.parentNode.replaceChild(freshBtn, confirmBtn);
+  freshBtn.id = 'approveConfirmBtn';
+  freshBtn.addEventListener('click', () => doApprove(runId));
+  Modal.open('approveModal');
+}
+
+async function doApprove(runId) {
+  const btn = document.getElementById('approveConfirmBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
+  try {
+    await API.patch('payroll_runs', runId, { status: 'approved' });
+    Modal.closeAll();
+    Toast.success('Payroll approved ✓ Janaa will process payment on time.');
+    await loadData();
+  } catch(err) {
+    Toast.error('Approval failed: ' + (err.message || ''));
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Confirm Approval'; }
+  }
+}
+
+function approveAllRuns() {
+  const pending = allRuns.filter(r => r.status === 'pending_approval');
+  if (pending.length) openApproveModal(pending[0].id);
+}
+
+/* ── CSV EXPORT ── */
+function exportCSV() {
+  const cur    = currency();
+  const sorted = [...allRuns].filter(r => r.status !== 'draft').sort((a,b) => (a.period||'').localeCompare(b.period||''));
+  if (!sorted.length) { Toast.warning('No data to export'); return; }
+
+  const header = ['Period','Gross Pay','Net Pay','Deductions','Employer Cost','Total Cost','Status'];
+  const rows   = sorted.map(r => [
+    fmt.period(r.period),
+    r.total_gross||0, r.total_net||0,
+    (r.total_gross||0)-(r.total_net||0),
+    r.total_employer_cost||0,
+    (r.total_gross||0)+(r.total_employer_cost||0),
+    r.status
+  ]);
+  const csv  = [header, ...rows].map(row => row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `janaa-cost-report-${user.client_id}-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  Toast.success('CSV exported ✓');
+}
+
+/* ── INIT ── */
+loadData();
+</script>
+</body>
+</html>

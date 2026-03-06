@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Janaa — My Pay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar" role="complementary" aria-label="Sidebar">
+    <div id="sidebarContent"></div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <button class="mobile-menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+      <div class="topbar-title">My Pay</div>
+      <div class="topbar-period" id="periodLabel">📅 —</div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary btn-sm" onclick="loadData()" id="refreshBtn">↻ Refresh</button>
+      </div>
+    </header>
+    <main class="page-content" id="pageContent" role="main"></main>
+  </div>
+</div>
+
+<!-- PAYSLIP MODAL -->
+<div class="modal-overlay" id="payslipModal" role="dialog" aria-modal="true" aria-labelledby="payslipModalTitle">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <span class="modal-title" id="payslipModalTitle">Payslip</span>
+      <button class="modal-close" onclick="Modal.close('payslipModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="payslipModalBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close('payslipModal')">Close</button>
+      <button class="btn btn-primary" onclick="printPayslip()">🖨 Print / Save PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- BANK UPDATE MODAL -->
+<div class="modal-overlay" id="bankModal" role="dialog" aria-modal="true" aria-labelledby="bankModalTitle">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title" id="bankModalTitle">🏦 Update Bank Details</span>
+      <button class="modal-close" onclick="Modal.close('bankModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-warning">
+        <span class="alert-icon">⚠</span>
+        <div class="alert-body">Changes will be reviewed by HR before the next payroll run. Ensure details are accurate — errors will delay your salary.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="bankName">Bank Name <span style="color:var(--danger)">*</span></label>
+        <input class="form-input" id="bankName" placeholder="e.g. HDFC Bank" autocomplete="organization">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="bankAccount">Account Number <span style="color:var(--danger)">*</span></label>
+        <input class="form-input" id="bankAccount" placeholder="Full account number" autocomplete="off" inputmode="numeric">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="bankAccountConfirm">Confirm Account Number <span style="color:var(--danger)">*</span></label>
+        <input class="form-input" id="bankAccountConfirm" placeholder="Re-enter account number" autocomplete="off" inputmode="numeric">
+      </div>
+      <div class="form-group" id="ifscGroup">
+        <label class="form-label" for="ifscCode">IFSC Code <span style="color:var(--gray-400)">(India only)</span></label>
+        <input class="form-input" id="ifscCode" placeholder="e.g. HDFC0001234" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close('bankModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitBankUpdate()" id="bankSubmitBtn">Submit for Review</button>
+    </div>
+  </div>
+</div>
+
+<!-- DOCUMENT UPLOAD MODAL -->
+<div class="modal-overlay" id="docModal" role="dialog" aria-modal="true" aria-labelledby="docModalTitle">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title" id="docModalTitle">📁 Upload Document</span>
+      <button class="modal-close" onclick="Modal.close('docModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="docType">Document Type</label>
+        <select class="form-select" id="docType"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">File <span style="color:var(--gray-400)">(PDF, JPG, PNG · max 5MB)</span></label>
+        <div id="dropZone" style="border:2px dashed var(--gray-200);border-radius:8px;padding:24px;
+             text-align:center;cursor:pointer;background:var(--gray-50);transition:border-color .18s"
+             onclick="document.getElementById('docFile').click()"
+             ondragover="event.preventDefault();this.style.borderColor='var(--primary)'"
+             ondragleave="this.style.borderColor='var(--gray-200)'"
+             ondrop="handleFileDrop(event)">
+          <div style="font-size:1.5rem;margin-bottom:6px">📎</div>
+          <div style="font-size:.84rem;color:var(--gray-500)">Click to select or drag & drop</div>
+        </div>
+        <input type="file" id="docFile" style="display:none" accept=".pdf,.jpg,.jpeg,.png" aria-label="Select file">
+        <div id="docFileName" style="font-size:.8rem;color:var(--success);margin-top:6px"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="docNotes">Notes (optional)</label>
+        <textarea class="form-textarea" id="docNotes" rows="2" placeholder="Any additional context…"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close('docModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitDoc()" id="docSubmitBtn">Submit Document</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/utils.js"></script>
+<script>
+'use strict';
+
+/* ── AUTH ── */
+const user = Session.require(['employee']);
+if (!user) { /* redirect handled */ }
+
+/* ── STATE ── */
+let empData  = null;
+let payslips = [];
+let myRun    = null;
+let currentTab = 'overview';
+let isLoading  = false;
+
+const isIndia  = () => user?.country === 'India';
+const currency = () => isIndia() ? 'INR' : 'PHP';
+
+/* ── NAV ── */
+function switchTab(id) {
+  const valid = ['overview','payslips','profile','documents'];
+  if (!valid.includes(id)) return;
+  currentTab = id;
+  document.querySelectorAll('.nav-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.navId === id)
+  );
+  renderPage();
+}
+
+/* ── SIDEBAR ── */
+function renderSidebar() {
+  const missingBank = !empData?.bank_account;
+  const nav = [
+    { type: 'section', label: 'My Pay' },
+    { id: 'overview',  href: '#', icon: '⊞', label: 'Overview' },
+    { id: 'payslips',  href: '#', icon: '📄', label: 'My Payslips' },
+    { id: 'profile',   href: '#', icon: '👤', label: 'My Profile',  badge: missingBank ? '!' : '' },
+    { id: 'documents', href: '#', icon: '📁', label: 'Documents' },
+    { type: 'section', label: 'Account' },
+    { id: 'switch-view', href: 'index.html', icon: '↩', label: 'Switch Role' },
+  ];
+  document.getElementById('sidebarContent').innerHTML = buildSidebar({
+    name: user.name, email: user.email, role: user.role,
+    navItems: nav, activePage: currentTab
+  });
+  initSidebarNav(switchTab);
+}
+
+/* ── LOAD DATA ── */
+async function loadData() {
+  if (isLoading) return;
+  isLoading = true;
+  const btn = document.getElementById('refreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ …'; }
+  Loading.show('pageContent', 'Loading your pay information…');
+
+  try {
+    const [empRes, psRes, runsRes] = await Promise.all([
+      API.get('employees',    { limit: 100 }),
+      API.get('payslips',     { limit: 50 }),
+      API.get('payroll_runs', { limit: 50 }),
+    ]);
+
+    empData  = (empRes?.data  || []).find(e => e.id === user.id) || null;
+    payslips = (psRes?.data   || [])
+      .filter(p => p.employee_id === user.id)
+      .sort((a,b) => (b.period||'').localeCompare(a.period||''));
+
+    if (payslips.length) {
+      const latestPeriod = payslips[0].period;
+      myRun = (runsRes?.data || []).find(r => r.period === latestPeriod && r.client_id === user.client_id) || null;
+      const pLabel = document.getElementById('periodLabel');
+      if (pLabel) pLabel.textContent = `📅 ${fmt.period(latestPeriod)}`;
+    }
+
+    // Populate doc type select based on country
+    const docSel = document.getElementById('docType');
+    if (docSel) {
+      const docTypes = isIndia()
+        ? ['PAN Card','Aadhaar Card','Form 12B (Previous Employment)','Investment Declaration','Rent Receipts (HRA)','Other']
+        : ['SSS ID','PhilHealth ID','Pag-IBIG ID','TIN Card','COE / ITR','BIR Form 2316','Other'];
+      docSel.innerHTML = docTypes.map(d => `<option>${d}</option>`).join('');
+    }
+
+    // Show/hide IFSC field
+    const ifscGroup = document.getElementById('ifscGroup');
+    if (ifscGroup) ifscGroup.style.display = isIndia() ? '' : 'none';
+
+    renderSidebar();
+    renderPage();
+  } catch(err) {
+    console.error('loadData error:', err);
+    Loading.error('pageContent', err.message || 'Failed to load data.', loadData);
+    Toast.error('Failed to load your data — please refresh.');
+  } finally {
+    isLoading = false;
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+  }
+}
+
+/* ── RENDER PAGE ── */
+function renderPage() {
+  const c = document.getElementById('pageContent');
+  if (!c) return;
+  try {
+    if      (currentTab === 'overview')   c.innerHTML = renderOverview();
+    else if (currentTab === 'payslips')   c.innerHTML = renderPayslips();
+    else if (currentTab === 'profile')    c.innerHTML = renderProfile();
+    else if (currentTab === 'documents')  c.innerHTML = renderDocuments();
+
+    // Re-attach file listener after render
+    const docFile = document.getElementById('docFile');
+    if (docFile) {
+      docFile.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (file) {
+          if (file.size > 5 * 1024 * 1024) { Toast.error('File too large. Max 5MB.'); e.target.value = ''; return; }
+          document.getElementById('docFileName').textContent = `✓ ${file.name}`;
+        }
+      });
+    }
+  } catch(err) {
+    console.error('renderPage error:', err);
+    Loading.error('pageContent', 'Failed to render this view.', loadData);
+  }
+}
+
+/* ── FILE DROP ── */
+function handleFileDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').style.borderColor = 'var(--gray-200)';
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { Toast.error('File too large. Max 5MB.'); return; }
+  document.getElementById('docFileName').textContent = `✓ ${file.name}`;
+}
+
+/* ── OVERVIEW ── */
+function renderOverview() {
+  if (!empData) {
+    return `<div class="empty-state"><div class="empty-icon">😕</div>
+      <h3>Employee profile not found</h3>
+      <p>Please contact your HR or Janaa support.</p></div>`;
+  }
+  const cur          = currency();
+  const ind          = isIndia();
+  const latestSlip   = payslips[0] || null;
+  const missingBank  = !empData.bank_account;
+
+  const payStatusHtml = myRun ? `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap">
+      <div style="font-size:2rem" aria-hidden="true">
+        ${myRun.status==='paid'?'✅':myRun.status==='processing'?'⚙️':myRun.status==='pending_approval'?'⏳':'📋'}
+      </div>
+      <div>
+        <div style="font-size:1.05rem;font-weight:700">${{
+          paid:'Payment Sent 🎉', processing:'Processing…',
+          pending_approval:'Awaiting Approval', approved:'Approved — Processing Payment',
+          draft:'In Preparation'
+        }[myRun.status] || myRun.status}</div>
+        <div style="font-size:.82rem;color:var(--gray-500)">
+          ${fmt.period(myRun.period)} payroll
+          ${myRun.status==='paid' ? `· Paid ${fmt.date(myRun.payment_date)}` : `· Expected ${fmt.date(myRun.payment_date)}`}
+        </div>
+      </div>
+      <div style="margin-left:auto">${statusBadge(myRun.status)}</div>
+    </div>` : '<p style="color:var(--gray-400)">No current payroll run found.</p>';
+
+  return `
+    ${missingBank ? `
+      <div class="alert alert-danger" role="alert">
+        <span class="alert-icon">🏦</span>
+        <div class="alert-body">
+          <div class="alert-title">⚠ Bank details missing — your payment will be held!</div>
+          Please update your bank account before the payroll deadline.
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="Modal.open('bankModal')">Update Now</button>
+      </div>` : ''}
+
+    <div style="margin-bottom:24px">
+      <h1 style="font-size:1.6rem">Hi, ${fmt.escapeHtml(empData.name.split(' ')[0])}! 👋</h1>
+      <p style="margin-top:4px">${fmt.escapeHtml(empData.position)} at ${fmt.escapeHtml(user.company||'')} · ${countryFlag(empData.country)} ${empData.country}</p>
+    </div>
+
+    <div class="grid-2-1">
+      <div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">💸 Pay Status — ${fmt.period(myRun?.period || payslips[0]?.period || '')}</span>
+          </div>
+          <div class="card-body">${payStatusHtml}</div>
+        </div>
+
+        ${latestSlip ? `
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">📄 Latest Payslip — ${fmt.period(latestSlip.period)}</span>
+              <button class="btn btn-primary btn-sm" onclick="openPayslip('${latestSlip.id}')">View Full →</button>
+            </div>
+            <div class="card-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+                <div style="background:var(--gray-50);border-radius:8px;padding:14px;text-align:center">
+                  <div style="font-size:.7rem;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px">Gross</div>
+                  <div style="font-size:1.05rem;font-weight:700">${fmt.currency(latestSlip.gross_salary||0, cur)}</div>
+                </div>
+                <div style="background:var(--primary);border-radius:8px;padding:14px;text-align:center">
+                  <div style="font-size:.7rem;color:rgba(255,255,255,.7);text-transform:uppercase;margin-bottom:4px">Take Home</div>
+                  <div style="font-size:1.05rem;font-weight:700;color:#fff">${fmt.currency(latestSlip.net_pay||0, cur)}</div>
+                </div>
+                <div style="background:var(--gray-50);border-radius:8px;padding:14px;text-align:center">
+                  <div style="font-size:.7rem;color:var(--gray-500);text-transform:uppercase;margin-bottom:4px">Deductions</div>
+                  <div style="font-size:1.05rem;font-weight:700;color:var(--danger)">${fmt.currency((latestSlip.gross_salary||0)-(latestSlip.net_pay||0), cur)}</div>
+                </div>
+              </div>
+              <div style="font-size:.83rem">
+                ${[[ind?'Basic Pay':'Basic Pay', latestSlip.basic_pay],
+                   ind?['HRA', latestSlip.hra]:null,
+                   ['Allowances', latestSlip.special_allowance],
+                   !ind&&latestSlip.thirteenth_month?['13th Month', latestSlip.thirteenth_month]:null,
+                  ].filter(Boolean).map(([l,v]) => v
+                    ? `<div class="flex-between mb-8"><span class="color-muted">${l}</span><span>${fmt.currencyFull(v||0, cur)}</span></div>`
+                    : '').join('')}
+                <div style="border-top:1px solid var(--gray-200);margin:8px 0"></div>
+                ${[[ind?'PF':'SSS', latestSlip.pf_sss],
+                   [ind?'ESI':'PhilHealth', latestSlip.esi_philhealth],
+                   [ind?'TDS':'Withholding Tax', latestSlip.tax_tds_wht],
+                  ].filter(([,v]) => v).map(([l,v]) =>
+                    `<div class="flex-between mb-8"><span class="color-muted">${l}</span><span style="color:var(--danger)">-${fmt.currencyFull(v||0, cur)}</span></div>`
+                  ).join('')}
+              </div>
+            </div>
+          </div>` : `
+          <div class="card"><div class="card-body">
+            <div class="empty-state"><div class="empty-icon">📄</div><h3>No payslips yet</h3></div>
+          </div></div>`}
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">⚡ Quick Actions</span></div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+            <button class="btn btn-secondary" style="justify-content:flex-start;gap:12px" onclick="Modal.open('bankModal')">
+              🏦 <span style="flex:1;text-align:left">Update Bank Details</span>
+              ${missingBank ? '<span class="badge badge-red">Required</span>' : '<span class="badge badge-green">✓ On file</span>'}
+            </button>
+            <button class="btn btn-secondary" style="justify-content:flex-start;gap:12px" onclick="Modal.open('docModal')">
+              📁 <span>Upload Document</span>
+            </button>
+            ${latestSlip ? `
+              <button class="btn btn-secondary" style="justify-content:flex-start;gap:12px" onclick="openPayslip('${latestSlip.id}')">
+                📄 <span>View Latest Payslip</span>
+              </button>` : ''}
+            <button class="btn btn-secondary" style="justify-content:flex-start;gap:12px" onclick="switchTab('payslips')">
+              📜 <span>Payslip History (${payslips.length})</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">👤 My Details</span></div>
+          <div class="card-body" style="font-size:.84rem">
+            ${[
+              ['Company',    user.company],
+              ['Department', empData.department],
+              ['Position',   empData.position],
+              ['Start Date', fmt.date(empData.start_date)],
+              ['Country',    `${countryFlag(empData.country)} ${empData.country}`],
+              ['Bank',       empData.bank_account
+                ? `${empData.bank_name} ${empData.bank_account}`
+                : '<span class="badge badge-red">⚠ Not provided</span>'],
+            ].map(([k,v]) => `
+              <div class="flex-between mb-8">
+                <span class="color-muted">${k}</span>
+                <span class="fw-600" style="max-width:200px;text-align:right">${fmt.escapeHtml(String(v||'—'))}</span>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        ${ind ? `
+          <div class="card">
+            <div class="card-header"><span aria-hidden="true">🇮🇳</span><span class="card-title">India — Key Deductions</span></div>
+            <div class="card-body" style="font-size:.82rem">
+              ${[
+                ['PF (12% of Basic)',   latestSlip ? fmt.currencyFull(Math.round((latestSlip.basic_pay||0)*0.12), cur) : '—'],
+                ['ESI (salary ≤ ₹21K)',latestSlip?.esi_philhealth ? fmt.currencyFull(latestSlip.esi_philhealth, cur) : 'Not applicable'],
+                ['TDS (as computed)',   latestSlip ? fmt.currencyFull(latestSlip.tax_tds_wht||0, cur) : '—'],
+              ].map(([l,v]) => `<div class="flex-between mb-8"><span class="color-muted">${l}</span><span>${v}</span></div>`).join('')}
+              <div style="margin-top:10px;padding:10px;background:var(--primary-light);border-radius:6px;font-size:.78rem;color:var(--primary)">
+                💡 Submit investment declarations and rent receipts to your HR to reduce your TDS.
+              </div>
+            </div>
+          </div>` : `
+          <div class="card">
+            <div class="card-header"><span aria-hidden="true">🇵🇭</span><span class="card-title">Philippines — Deductions</span></div>
+            <div class="card-body" style="font-size:.82rem">
+              ${[
+                ['SSS Contribution',   latestSlip ? fmt.currencyFull(latestSlip.pf_sss||0, cur) : '—'],
+                ['PhilHealth Premium', latestSlip ? fmt.currencyFull(latestSlip.esi_philhealth||0, cur) : '—'],
+                ['Withholding Tax',    latestSlip ? fmt.currencyFull(latestSlip.tax_tds_wht||0, cur) : '—'],
+              ].map(([l,v]) => `<div class="flex-between mb-8"><span class="color-muted">${l}</span><span>${v}</span></div>`).join('')}
+              <div style="margin-top:10px;padding:10px;background:var(--success-light);border-radius:6px;font-size:.78rem;color:var(--success)">
+                🗓 13th Month Pay reminder: Due on or before <strong>December 24</strong> every year.
+              </div>
+            </div>
+          </div>`}
+      </div>
+    </div>`;
+}
+
+/* ── PAYSLIPS ── */
+function renderPayslips() {
+  if (!payslips.length) {
+    return `<h2 style="margin-bottom:16px">📄 My Payslips</h2>
+      <div class="card"><div class="card-body">
+        <div class="empty-state"><div class="empty-icon">📄</div>
+          <h3>No payslips yet</h3><p>Payslips will appear here after each payroll run.</p>
+        </div>
+      </div></div>`;
+  }
+  const cur = currency();
+  return `
+    <h2 style="margin-bottom:16px">📄 My Payslips <span class="badge badge-gray" style="font-size:.8rem;vertical-align:middle">${payslips.length}</span></h2>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      ${payslips.map(p => `
+        <div class="card" style="cursor:pointer" onclick="openPayslip('${p.id}')"
+             role="button" tabindex="0" aria-label="View payslip for ${fmt.period(p.period)}"
+             onkeydown="if(event.key==='Enter')openPayslip('${p.id}')">
+          <div class="card-body">
+            <div class="flex-between">
+              <div class="flex-gap-12">
+                <div style="width:44px;height:44px;background:var(--primary-light);border-radius:10px;
+                            display:flex;align-items:center;justify-content:center;font-size:1.3rem" aria-hidden="true">📄</div>
+                <div>
+                  <div class="fw-700">${fmt.period(p.period)} Payslip</div>
+                  <div style="font-size:.8rem;color:var(--gray-500);margin-top:3px">
+                    ${statusBadge(p.status)}
+                    ${p.payment_date ? ` · Paid ${fmt.date(p.payment_date)}` : ''}
+                  </div>
+                </div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:1.1rem;font-weight:700">${fmt.currencyFull(p.net_pay||0, cur)}</div>
+                <div style="font-size:.76rem;color:var(--gray-500)">Net Pay</div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:12px;font-size:.8rem;align-items:center">
+              <div><span class="color-muted">Gross: </span>${fmt.currencyFull(p.gross_salary||0, cur)}</div>
+              <div><span class="color-muted">Deductions: </span><span style="color:var(--danger)">-${fmt.currencyFull((p.gross_salary||0)-(p.net_pay||0), cur)}</span></div>
+              <button class="btn btn-secondary btn-xs" onclick="event.stopPropagation();openPayslip('${p.id}')">View →</button>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+/* ── PROFILE ── */
+function renderProfile() {
+  if (!empData) return '<div class="empty-state"><p>Profile not found.</p></div>';
+  const cur = currency();
+  return `
+    <h2 style="margin-bottom:16px">👤 My Profile</h2>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Personal Information</span></div>
+        <div class="card-body">
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
+            <div style="width:64px;height:64px;border-radius:50%;background:var(--purple);
+                        display:flex;align-items:center;justify-content:center;
+                        color:#fff;font-size:1.3rem;font-weight:700" aria-hidden="true">
+              ${fmt.initials(empData.name)}
+            </div>
+            <div>
+              <div style="font-size:1.1rem;font-weight:700">${fmt.escapeHtml(empData.name)}</div>
+              <div style="color:var(--gray-500);font-size:.85rem">${fmt.escapeHtml(empData.email)}</div>
+              <div style="margin-top:4px">${statusBadge(empData.status)}</div>
+            </div>
+          </div>
+          <div style="font-size:.84rem">
+            ${[
+              ['Position',    empData.position],
+              ['Department',  empData.department],
+              ['Company',     user.company],
+              ['Country',     `${countryFlag(empData.country)} ${empData.country}`],
+              ['Start Date',  fmt.date(empData.start_date)],
+              ['Employee ID', empData.id],
+            ].map(([k,v]) => `
+              <div class="flex-between mb-8">
+                <span class="color-muted">${k}</span>
+                <strong>${fmt.escapeHtml(String(v||'—'))}</strong>
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🏦 Bank Details</span>
+          <button class="btn btn-primary btn-sm" onclick="Modal.open('bankModal')">✏ Update</button>
+        </div>
+        <div class="card-body">
+          ${!empData.bank_account
+            ? `<div class="alert alert-danger">
+                 <span class="alert-icon">⚠</span>
+                 <div class="alert-body">
+                   <div class="alert-title">No bank account on file</div>
+                   Your salary payment is on hold until you add your bank details.
+                 </div>
+               </div>
+               <button class="btn btn-primary" onclick="Modal.open('bankModal')" style="width:100%">+ Add Bank Account</button>`
+            : `<div style="background:var(--success-light);border-radius:8px;padding:14px;margin-bottom:12px">
+                 <div style="font-size:.78rem;color:var(--success);font-weight:600;margin-bottom:6px">✓ Bank account on file</div>
+                 <div style="font-weight:700">${fmt.escapeHtml(empData.bank_name||'')}</div>
+                 <div style="font-size:.9rem;color:var(--gray-600)">${fmt.escapeHtml(empData.bank_account)}</div>
+               </div>
+               <button class="btn btn-secondary" onclick="Modal.open('bankModal')" style="width:100%">✏ Update Bank Details</button>`}
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ── DOCUMENTS ── */
+function renderDocuments() {
+  const ind  = isIndia();
+  const docs = ind ? [
+    { name: 'PAN Card',                    status: 'submitted', date: '2022-03-15' },
+    { name: 'Aadhaar Card',                status: 'submitted', date: '2022-03-15' },
+    { name: 'Form 12B (Prev. Employment)', status: 'pending',   date: null },
+    { name: 'Investment Declaration',      status: 'pending',   date: null },
+    { name: 'Rent Receipts (HRA)',         status: 'pending',   date: null },
+  ] : [
+    { name: 'SSS ID',         status: 'submitted', date: '2021-05-20' },
+    { name: 'PhilHealth ID',  status: 'submitted', date: '2021-05-20' },
+    { name: 'Pag-IBIG ID',   status: 'submitted', date: '2021-05-20' },
+    { name: 'TIN Card',       status: 'pending',   date: null },
+    { name: 'COE / ITR',      status: 'pending',   date: null },
+    { name: 'BIR Form 2316',  status: 'pending',   date: null },
+  ];
+
+  return `
+    <h2 style="margin-bottom:16px">📁 Documents</h2>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Required Documents</span>
+        <button class="btn btn-primary btn-sm" onclick="Modal.open('docModal')">+ Upload</button>
+      </div>
+      <div class="card-body">
+        <div class="checklist">
+          ${docs.map(d => `
+            <div class="check-item ${d.status === 'submitted' ? 'done' : ''}">
+              <div class="check-toggle" aria-hidden="true">${d.status === 'submitted' ? '✓' : ''}</div>
+              <div class="check-content">
+                <div class="check-title">${fmt.escapeHtml(d.name)}</div>
+                <div class="check-desc">
+                  ${d.status === 'submitted'
+                    ? `Submitted on ${fmt.date(d.date)}`
+                    : 'Not yet submitted — please upload when available'}
+                </div>
+              </div>
+              ${d.status !== 'submitted'
+                ? `<button class="btn btn-primary btn-xs" onclick="Modal.open('docModal')">Upload</button>`
+                : ''}
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ── PAYSLIP MODAL ── */
+function openPayslip(id) {
+  const p = payslips.find(ps => ps.id === id);
+  if (!p) return;
+  const ind = p.country === 'India';
+  const cur = p.currency;
+  document.getElementById('payslipModalTitle').textContent = `Payslip — ${fmt.period(p.period)}`;
+  document.getElementById('payslipModalBody').innerHTML = `
+    <div id="payslipPrint">
+      <div class="payslip-doc">
+        <div class="payslip-header">
+          <div>
+            <div class="payslip-company">${fmt.escapeHtml(user.company||'')}</div>
+            <div class="payslip-period">Payslip for ${fmt.period(p.period)}</div>
+          </div>
+          <span class="payslip-powered">Powered by Janaa</span>
+        </div>
+
+        <div class="payslip-employee-grid">
+          ${[
+            ['Employee Name', p.employee_name],
+            ['Employee ID',   p.employee_id],
+            ['Country',       `${countryFlag(p.country)} ${p.country}`],
+            ['Payment Date',  fmt.date(p.payment_date)],
+            ['Status',        statusBadge(p.status)],
+            ['Period',        fmt.period(p.period)],
+          ].map(([l,v]) => `
+            <div>
+              <div class="payslip-field-label">${l}</div>
+              <div class="payslip-field-value">${fmt.escapeHtml(String(v||'—'))}</div>
+            </div>`).join('')}
+        </div>
+
+        <table class="payslip-table">
+          <thead><tr><th>Earnings</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>
+            <tr><td>Basic Pay</td><td>${fmt.currencyFull(p.basic_pay||0, cur)}</td></tr>
+            ${p.hra    ? `<tr><td>${ind?'House Rent Allowance (HRA)':'Housing Allowance'}</td><td>${fmt.currencyFull(p.hra, cur)}</td></tr>` : ''}
+            ${p.special_allowance  ? `<tr><td>Special Allowance</td><td>${fmt.currencyFull(p.special_allowance, cur)}</td></tr>` : ''}
+            ${p.thirteenth_month   ? `<tr><td>13th Month Pay</td><td>${fmt.currencyFull(p.thirteenth_month, cur)}</td></tr>` : ''}
+            <tr class="total-row"><td><strong>Gross Salary</strong></td><td>${fmt.currencyFull(p.gross_salary||0, cur)}</td></tr>
+          </tbody>
+        </table>
+
+        <table class="payslip-table" style="margin-top:16px">
+          <thead><tr><th>Deductions</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>
+            ${p.pf_sss         ? `<tr><td>${ind?'Provident Fund (PF)':'SSS Contribution'}</td><td>- ${fmt.currencyFull(p.pf_sss, cur)}</td></tr>` : ''}
+            ${p.esi_philhealth ? `<tr><td>${ind?'ESI Contribution':'PhilHealth Premium'}</td><td>- ${fmt.currencyFull(p.esi_philhealth, cur)}</td></tr>` : ''}
+            ${p.tax_tds_wht    ? `<tr><td>${ind?'TDS (Income Tax)':'Withholding Tax (BIR)'}</td><td>- ${fmt.currencyFull(p.tax_tds_wht, cur)}</td></tr>` : ''}
+            ${p.other_deductions ? `<tr><td>Other Deductions</td><td>- ${fmt.currencyFull(p.other_deductions, cur)}</td></tr>` : ''}
+            <tr class="total-row"><td><strong>Total Deductions</strong></td><td>- ${fmt.currencyFull((p.gross_salary||0)-(p.net_pay||0), cur)}</td></tr>
+          </tbody>
+        </table>
+
+        <div class="payslip-net">
+          <span class="net-label">Net Take-Home Pay</span>
+          <span class="net-amount">${fmt.currencyFull(p.net_pay||0, cur)}</span>
+        </div>
+      </div>
+    </div>`;
+  Modal.open('payslipModal');
+}
+
+function printPayslip() {
+  const el = document.getElementById('payslipPrint');
+  if (!el) return;
+  const w = window.open('', '_blank');
+  if (!w) { Toast.error('Please allow pop-ups to print.'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="en"><head>
+    <meta charset="UTF-8">
+    <title>Payslip — Janaa</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/main.css">
+    <style>
+      body { padding:24px; background:#fff; font-family:Inter,sans-serif; }
+      @media print { body { padding:0; } }
+    </style>
+    </head><body>${el.innerHTML}</body></html>`);
+  w.document.close();
+  w.onload = () => { setTimeout(() => w.print(), 500); };
+}
+
+/* ── BANK UPDATE ── */
+async function submitBankUpdate() {
+  const btn     = document.getElementById('bankSubmitBtn');
+  const bankName    = document.getElementById('bankName')?.value.trim();
+  const bankAccount = document.getElementById('bankAccount')?.value.trim();
+  const bankConfirm = document.getElementById('bankAccountConfirm')?.value.trim();
+
+  if (!bankName)    { Toast.error('Please enter your bank name.');           return; }
+  if (!bankAccount) { Toast.error('Please enter your account number.');      return; }
+  if (bankAccount !== bankConfirm) { Toast.error('Account numbers do not match.'); return; }
+  if (!/^\d{6,20}$/.test(bankAccount)) { Toast.error('Account number must be 6–20 digits.'); return; }
+
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  try {
+    await API.patch('employees', user.id, {
+      bank_name:    bankName,
+      bank_account: 'XXXX-' + bankAccount.slice(-4),
+    });
+    Modal.closeAll();
+    Toast.success('Bank details submitted for review ✓');
+    // Clear fields
+    ['bankName','bankAccount','bankAccountConfirm','ifscCode'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    await loadData();
+  } catch(err) {
+    Toast.error('Failed to submit: ' + (err.message || ''));
+  } finally {
+    btn.disabled = false; btn.textContent = 'Submit for Review';
+  }
+}
+
+/* ── DOC UPLOAD ── */
+function submitDoc() {
+  const docType = document.getElementById('docType')?.value;
+  const docFile = document.getElementById('docFile');
+  if (!docFile?.files?.length) { Toast.error('Please select a file.'); return; }
+  Modal.closeAll();
+  Toast.success(`"${docType}" submitted for review ✓`);
+  // Reset
+  if (docFile) docFile.value = '';
+  const dfn = document.getElementById('docFileName'); if (dfn) dfn.textContent = '';
+  const dn  = document.getElementById('docNotes');    if (dn)  dn.value = '';
+}
+
+/* ── INIT ── */
+loadData();
+</script>
+</body>
+</html>

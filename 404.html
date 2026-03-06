@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page Not Found — Janaa</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #0A0F1E;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container {
+      text-align: center;
+      max-width: 480px;
+    }
+    .logo-mark {
+      width: 56px; height: 56px;
+      background: #1B4FFF;
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 1.4rem; color: #fff;
+      margin: 0 auto 24px;
+      box-shadow: 0 8px 24px rgba(27,79,255,.4);
+    }
+    .code {
+      font-size: 5rem;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -.04em;
+      line-height: 1;
+      margin-bottom: 12px;
+    }
+    .title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: rgba(255,255,255,.8);
+      margin-bottom: 10px;
+    }
+    .desc {
+      font-size: .9rem;
+      color: rgba(255,255,255,.4);
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #1B4FFF;
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-size: .9rem;
+      font-weight: 700;
+      text-decoration: none;
+      transition: background .18s;
+    }
+    .btn:hover { background: #1340CC; }
+    .links {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .link {
+      font-size: .82rem;
+      color: rgba(255,255,255,.35);
+      text-decoration: none;
+      transition: color .18s;
+    }
+    .link:hover { color: rgba(255,255,255,.7); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo-mark" aria-hidden="true">J</div>
+    <div class="code" aria-label="Error 404">404</div>
+    <div class="title">Page not found</div>
+    <p class="desc">The page you're looking for doesn't exist or you may not have permission to view it.</p>
+    <a href="index.html" class="btn">← Back to Login</a>
+    <div class="links">
+      <a href="ops.html"   class="link">Ops Portal</a>
+      <a href="admin.html" class="link">Admin Portal</a>
+      <a href="me.html"    class="link">My Pay</a>
+    </div>
+  </div>
+  <script>
+    // If user has a session, redirect to their dashboard
+    try {
+      const u = JSON.parse(localStorage.getItem('janaa_user') || 'null');
+      if (u && u.role) {
+        const dest = { ops:'ops.html', admin:'admin.html', employee:'me.html' }[u.role];
+        if (dest) setTimeout(() => window.location.replace(dest), 1500);
+      }
+    } catch(e) {}
+  </script>
+</body>
+</html>

@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Janaa — Payroll Register</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar" role="complementary" aria-label="Sidebar">
+    <div id="sidebarContent"></div>
+  </aside>
+
+  <div class="main-content">
+    <header class="topbar">
+      <button class="mobile-menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+      <div class="topbar-title">📋 Payroll Register</div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary btn-sm" onclick="history.back()">← Back</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportCSV()" id="exportBtn">↓ Export CSV</button>
+        <button class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print</button>
+      </div>
+    </header>
+    <main class="page-content" id="pageContent" role="main"></main>
+  </div>
+</div>
+
+<script src="js/utils.js"></script>
+<script>
+'use strict';
+
+/* ── AUTH ── */
+const user = Session.require(['ops', 'admin']);
+if (!user) { /* redirect handled */ }
+
+const params      = new URLSearchParams(location.search);
+const runIdParam  = params.get('run');
+
+let allRuns       = [];
+let allSlips      = [];
+let selectedRunId = runIdParam || null;
+let chartInst     = null;
+let isLoading     = false;
+
+/* ── SIDEBAR ── */
+function renderSidebar() {
+  const backHref  = user.role === 'ops' ? 'ops.html' : 'admin.html';
+  const backLabel = user.role === 'ops' ? 'Back to Ops' : 'Back to Admin';
+  const nav = [
+    { type: 'section', label: 'Navigation' },
+    { id: 'back', href: backHref, icon: '←', label: backLabel },
+    { id: 'register', href: '#', icon: '📋', label: 'Payroll Register' },
+    { type: 'section', label: 'Account' },
+    { id: 'switch', href: 'index.html', icon: '↩', label: 'Switch Role' },
+  ];
+  document.getElementById('sidebarContent').innerHTML = buildSidebar({
+    name: user.name, email: user.email, role: user.role,
+    navItems: nav, activePage: 'register'
+  });
+}
+
+/* ── LOAD DATA ── */
+async function loadData() {
+  if (isLoading) return;
+  isLoading = true;
+  Loading.show('pageContent', 'Loading payroll register…');
+
+  try {
+    const [runsRes, slipsRes] = await Promise.all([
+      API.get('payroll_runs', { limit: 100 }),
+      API.get('payslips',     { limit: 200 }),
+    ]);
+
+    const allRunsRaw = runsRes?.data || [];
+    allRuns  = user.role === 'admin'
+      ? allRunsRaw.filter(r => r.client_id === user.client_id)
+      : allRunsRaw;
+    allSlips = slipsRes?.data || [];
+
+    if (!selectedRunId && allRuns.length) {
+      // Default: first pending/processing run, else most recent
+      const active = allRuns.find(r => ['processing','pending_approval'].includes(r.status));
+      selectedRunId = active?.id || allRuns.sort((a,b) => (b.period||'').localeCompare(a.period||''))[0]?.id;
+    }
+
+    renderSidebar();
+    render();
+  } catch(err) {
+    console.error('loadData error:', err);
+    Loading.error('pageContent', err.message || 'Failed to load register.', loadData);
+    Toast.error('Failed to load register data.');
+  } finally {
+    isLoading = false;
+  }
+}
+
+/* ── RENDER ── */
+function render() {
+  const run   = allRuns.find(r => r.id === selectedRunId);
+  const slips = selectedRunId ? allSlips.filter(s => s.run_id === selectedRunId) : [];
+  const cur   = run?.currency || 'INR';
+
+  const totals = slips.reduce((acc, p) => ({
+    gross:    acc.gross    + (p.gross_salary||0),
+    net:      acc.net      + (p.net_pay||0),
+    pf:       acc.pf       + (p.pf_sss||0),
+    esi:      acc.esi      + (p.esi_philhealth||0),
+    tax:      acc.tax      + (p.tax_tds_wht||0),
+    basic:    acc.basic    + (p.basic_pay||0),
+    hra:      acc.hra      + (p.hra||0),
+    allow:    acc.allow    + (p.special_allowance||0),
+    thirteen: acc.thirteen + (p.thirteenth_month||0),
+  }), { gross:0, net:0, pf:0, esi:0, tax:0, basic:0, hra:0, allow:0, thirteen:0 });
+  totals.deductions = totals.gross - totals.net;
+
+  // Run selector
+  const runOptions = [...allRuns]
+    .sort((a,b) => (b.period||'').localeCompare(a.period||''))
+    .map(r => `<option value="${r.id}" ${r.id===selectedRunId?'selected':''}>${fmt.escapeHtml(r.run_name)}</option>`)
+    .join('');
+
+  const runSelector = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+      <label style="font-size:.84rem;font-weight:600;color:var(--gray-700);white-space:nowrap" for="runSelect">Select Run:</label>
+      <select class="form-select" id="runSelect" style="max-width:380px"
+              onchange="selectedRunId=this.value;render()" aria-label="Select payroll run">
+        ${runOptions || '<option>No runs available</option>'}
+      </select>
+      ${run ? statusBadge(run.status) : ''}
+    </div>`;
+
+  if (!run) {
+    document.getElementById('pageContent').innerHTML = runSelector +
+      `<div class="empty-state"><div class="empty-icon">📋</div>
+        <h3>No register found</h3><p>Select a payroll run above.</p></div>`;
+    return;
+  }
+
+  const isIndia = run.country === 'India';
+
+  const stats = `
+    <div class="stat-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
+      ${[
+        ['👥','Employees', slips.length, ''],
+        ['💰','Gross Pay',  fmt.currency(totals.gross, cur), ''],
+        ['✓', 'Net Pay',   fmt.currency(totals.net, cur), ''],
+        ['−', 'Deductions',fmt.currency(totals.deductions, cur), ''],
+        ['+', 'Employer Cost', fmt.currency(run.total_employer_cost||0, cur), ''],
+      ].map(([icon,label,val,sub]) => `
+        <div class="stat-card">
+          <div class="stat-icon" style="background:var(--gray-100);font-size:.9rem">${icon}</div>
+          <div class="stat-info">
+            <div class="stat-label">${label}</div>
+            <div class="stat-value" style="font-size:1.25rem">${val}</div>
+            ${sub ? `<div class="stat-sub">${sub}</div>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>`;
+
+  // Table columns depend on country
+  const headers = [
+    '#', 'Employee',
+    'Basic',
+    ...(isIndia ? ['HRA'] : []),
+    'Allowances',
+    ...(!isIndia ? ['13th Mo.'] : []),
+    'Gross',
+    isIndia ? 'PF' : 'SSS',
+    isIndia ? 'ESI' : 'PhilHealth',
+    isIndia ? 'TDS' : 'W/Tax',
+    'Net Pay',
+    'Status',
+  ];
+
+  const tableRows = slips.map((p, i) => {
+    const cells = [
+      `<td class="td-center" style="color:var(--gray-400);font-size:.75rem">${i+1}</td>`,
+      `<td><div class="flex-gap-8">
+        <div style="width:30px;height:30px;border-radius:50%;background:var(--primary);
+                    display:flex;align-items:center;justify-content:center;
+                    color:#fff;font-size:.7rem;font-weight:700;flex-shrink:0" aria-hidden="true">
+          ${fmt.initials(p.employee_name)}
+        </div>
+        <div>
+          <div class="fw-600">${fmt.escapeHtml(p.employee_name)}</div>
+          <div style="font-size:.72rem;color:var(--gray-400)">${fmt.escapeHtml(p.employee_id)}</div>
+        </div>
+      </div></td>`,
+      `<td class="td-mono td-right">${fmt.currencyFull(p.basic_pay||0, cur)}</td>`,
+      ...(isIndia ? [`<td class="td-mono td-right">${fmt.currencyFull(p.hra||0, cur)}</td>`] : []),
+      `<td class="td-mono td-right">${fmt.currencyFull(p.special_allowance||0, cur)}</td>`,
+      ...(!isIndia ? [`<td class="td-mono td-right">${p.thirteenth_month ? fmt.currencyFull(p.thirteenth_month, cur) : '—'}</td>`] : []),
+      `<td class="td-mono td-right fw-600">${fmt.currencyFull(p.gross_salary||0, cur)}</td>`,
+      `<td class="td-mono td-right" style="color:var(--danger)">-${fmt.currencyFull(p.pf_sss||0, cur)}</td>`,
+      `<td class="td-mono td-right" style="color:var(--danger)">-${fmt.currencyFull(p.esi_philhealth||0, cur)}</td>`,
+      `<td class="td-mono td-right" style="color:var(--danger)">-${fmt.currencyFull(p.tax_tds_wht||0, cur)}</td>`,
+      `<td class="td-mono td-right fw-700" style="color:var(--primary)">${fmt.currencyFull(p.net_pay||0, cur)}</td>`,
+      `<td>${statusBadge(p.status)}</td>`,
+    ];
+    return `<tr>${cells.join('')}</tr>`;
+  }).join('');
+
+  const totalsRow = `<tr style="background:var(--gray-800);color:#fff;font-weight:700">
+    <td colspan="2" style="padding:10px 16px;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em">TOTALS (${slips.length} employees)</td>
+    <td class="td-mono td-right">${fmt.currencyFull(totals.basic, cur)}</td>
+    ${isIndia ? `<td class="td-mono td-right">${fmt.currencyFull(totals.hra, cur)}</td>` : ''}
+    <td class="td-mono td-right">${fmt.currencyFull(totals.allow, cur)}</td>
+    ${!isIndia ? `<td class="td-mono td-right">${totals.thirteen ? fmt.currencyFull(totals.thirteen, cur) : '—'}</td>` : ''}
+    <td class="td-mono td-right">${fmt.currencyFull(totals.gross, cur)}</td>
+    <td class="td-mono td-right" style="color:#FCA5A5">-${fmt.currencyFull(totals.pf, cur)}</td>
+    <td class="td-mono td-right" style="color:#FCA5A5">-${fmt.currencyFull(totals.esi, cur)}</td>
+    <td class="td-mono td-right" style="color:#FCA5A5">-${fmt.currencyFull(totals.tax, cur)}</td>
+    <td class="td-mono td-right" style="color:#6EE7B7">${fmt.currencyFull(totals.net, cur)}</td>
+    <td></td>
+  </tr>`;
+
+  const table = slips.length ? `
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Employee Payroll Detail</span>
+        <div class="flex-gap-8">
+          <span class="badge badge-gray">${slips.length} employees</span>
+          ${statusBadge(run.status)}
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>${headers.map(h => `<th${h==='#'?' class="td-center"':['Gross','Basic','HRA','Allowances','Net Pay','SSS','PF','ESI','TDS','W/Tax','PhilHealth','13th Mo.'].includes(h)?' class="td-right"':''}>${h}</th>`).join('')}</tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+          <tfoot>${totalsRow}</tfoot>
+        </table>
+      </div>
+    </div>` :
+    `<div class="card"><div class="card-body">
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <h3>No payslips in this run</h3>
+        <p>Payslips will appear here once the run is processed.</p>
+      </div>
+    </div></div>`;
+
+  const runSummary = `
+    <div class="card">
+      <div class="card-header"><span class="card-title">Run Summary</span></div>
+      <div class="card-body" style="font-size:.84rem">
+        ${[
+          ['Run Name',       run.run_name],
+          ['Period',         fmt.period(run.period)],
+          ['Country',        `${countryFlag(run.country)} ${run.country}`],
+          ['Client',         run.client_name],
+          ['Payment Date',   fmt.date(run.payment_date)],
+          ['Approval By',    fmt.date(run.approval_deadline)],
+          ['Ops Owner',      run.ops_owner],
+          ['Gross Pay',      fmt.currencyFull(run.total_gross||0, cur)],
+          ['Net Pay',        fmt.currencyFull(run.total_net||0, cur)],
+          ['Employer Cost',  fmt.currencyFull(run.total_employer_cost||0, cur)],
+          ['Total Cost',     fmt.currencyFull((run.total_gross||0)+(run.total_employer_cost||0), cur)],
+          ['Status',         statusBadge(run.status)],
+        ].map(([k,v]) => `
+          <div class="flex-between mb-8">
+            <span class="color-muted">${k}</span>
+            <strong style="text-align:right;max-width:240px">${fmt.escapeHtml(String(v||'—'))}</strong>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  const chartSection = slips.length ? `
+    <div class="card">
+      <div class="card-header"><span class="card-title">Pay Component Breakdown</span></div>
+      <div class="card-body" style="height:220px;position:relative"><canvas id="breakdownChart"></canvas></div>
+    </div>` : '';
+
+  document.getElementById('pageContent').innerHTML = runSelector + stats +
+    `<div class="grid-2-1" style="margin-bottom:20px">
+       <div>${chartSection}</div>
+       <div>${runSummary}</div>
+     </div>` + table;
+
+  // Chart
+  if (slips.length) {
+    setTimeout(() => {
+      const canvas = document.getElementById('breakdownChart');
+      if (!canvas) return;
+      if (chartInst) { chartInst.destroy(); chartInst = null; }
+      const labels  = [
+        'Basic Pay', ...(isIndia ? ['HRA'] : []),
+        'Allowances',
+        isIndia ? 'PF' : 'SSS',
+        isIndia ? 'ESI' : 'PhilHealth',
+        isIndia ? 'TDS' : 'W/Tax',
+        'Net Pay'
+      ];
+      const data = [
+        totals.basic, ...(isIndia ? [totals.hra] : []),
+        totals.allow, totals.pf, totals.esi, totals.tax,
+        totals.net - totals.hra - totals.allow - totals.basic
+      ];
+      chartInst = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data,
+            backgroundColor: ['#1B4FFF','#00C9A7','#8B5CF6','#EF4444','#F59E0B','#EC4899','#10B981'],
+            borderWidth: 2,
+            borderColor: '#fff',
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } }
+        }
+      });
+    }, 80);
+  }
+}
+
+/* ── CSV EXPORT ── */
+function exportCSV() {
+  const run   = allRuns.find(r => r.id === selectedRunId);
+  const slips = allSlips.filter(s => s.run_id === selectedRunId);
+  if (!run || !slips.length) { Toast.warning('No data to export'); return; }
+
+  const isIndia = run.country === 'India';
+  const headers = [
+    'Employee ID','Name','Basic Pay',
+    ...(isIndia ? ['HRA'] : []),
+    'Special Allowance',
+    ...(!isIndia ? ['13th Month Pay'] : []),
+    'Gross Salary',
+    isIndia ? 'PF Deduction' : 'SSS Deduction',
+    isIndia ? 'ESI Deduction' : 'PhilHealth Deduction',
+    isIndia ? 'TDS' : 'Withholding Tax',
+    'Other Deductions','Net Pay','Status','Payment Date'
+  ];
+  const rows = slips.map(p => [
+    p.employee_id, p.employee_name, p.basic_pay||0,
+    ...(isIndia ? [p.hra||0] : []),
+    p.special_allowance||0,
+    ...(!isIndia ? [p.thirteenth_month||0] : []),
+    p.gross_salary||0, p.pf_sss||0, p.esi_philhealth||0, p.tax_tds_wht||0,
+    p.other_deductions||0, p.net_pay||0, p.status, p.payment_date||''
+  ]);
+
+  const csv = [headers, ...rows]
+    .map(row => row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))
+    .join('\n');
+
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }); // BOM for Excel
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `payroll-register-${run.client_id}-${run.period}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  Toast.success('Register exported ✓');
+}
+
+/* ── INIT ── */
+loadData();
+</script>
+</body>
+</html>

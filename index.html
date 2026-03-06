@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Janaa — Global Payroll Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #0A0F1E;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Animated background */
+    .bg-blobs {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    }
+    .blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: .18;
+      animation: blobFloat 8s ease-in-out infinite;
+    }
+    .blob-1 { width: 600px; height: 600px; background: #1B4FFF; top: -200px; left: -100px; animation-delay: 0s; }
+    .blob-2 { width: 400px; height: 400px; background: #00C9A7; bottom: -100px; right: -100px; animation-delay: 3s; }
+    .blob-3 { width: 300px; height: 300px; background: #8B5CF6; top: 50%; left: 50%; transform: translate(-50%,-50%); animation-delay: 1.5s; }
+    @keyframes blobFloat {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(20px, -20px) scale(1.05); }
+    }
+
+    /* Grid lines */
+    .bg-grid {
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+
+    .login-container {
+      position: relative; z-index: 1;
+      width: 100%; max-width: 960px;
+    }
+
+    /* Top brand */
+    .brand {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 44px;
+      justify-content: center;
+    }
+    .brand-mark {
+      width: 48px; height: 48px;
+      background: #1B4FFF;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 1.35rem; color: #fff;
+      box-shadow: 0 8px 24px rgba(27,79,255,.4);
+    }
+    .brand-name {
+      font-size: 1.6rem; font-weight: 800; color: #fff;
+      letter-spacing: -.04em;
+    }
+    .brand-sub {
+      font-size: .8rem; color: rgba(255,255,255,.45);
+      margin-top: 2px;
+    }
+
+    /* Hero text */
+    .hero-text {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .hero-text h1 {
+      font-size: 2.1rem;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -.04em;
+      margin-bottom: 10px;
+      line-height: 1.2;
+    }
+    .hero-text p {
+      font-size: .95rem;
+      color: rgba(255,255,255,.5);
+      max-width: 520px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+    .hero-countries {
+      display: flex; align-items: center; justify-content: center;
+      gap: 12px; margin-top: 14px;
+    }
+    .country-chip {
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 99px;
+      padding: 5px 14px;
+      font-size: .8rem; color: rgba(255,255,255,.7);
+      font-weight: 500;
+    }
+
+    /* Role cards */
+    .roles-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+
+    .role-card {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 16px;
+      padding: 28px 24px;
+      cursor: pointer;
+      transition: all .22s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .role-card:hover {
+      background: rgba(255,255,255,.09);
+      border-color: rgba(255,255,255,.2);
+      transform: translateY(-3px);
+    }
+    .role-card.selected {
+      border-color: var(--accent-color);
+      background: rgba(var(--accent-rgb), .12);
+      box-shadow: 0 0 0 2px var(--accent-color), 0 8px 32px rgba(0,0,0,.2);
+    }
+
+    .role-icon {
+      width: 56px; height: 56px;
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.6rem;
+      margin-bottom: 16px;
+    }
+
+    .role-name {
+      font-size: 1.05rem; font-weight: 700; color: #fff;
+      margin-bottom: 6px;
+    }
+    .role-desc {
+      font-size: .8rem; color: rgba(255,255,255,.45);
+      line-height: 1.55;
+      margin-bottom: 14px;
+    }
+
+    .role-features {
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .role-feature {
+      display: flex; align-items: center; gap: 7px;
+      font-size: .75rem; color: rgba(255,255,255,.55);
+    }
+    .feature-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--accent-color);
+      flex-shrink: 0;
+    }
+
+    .role-card-arrow {
+      position: absolute; bottom: 20px; right: 20px;
+      width: 28px; height: 28px;
+      background: var(--accent-color);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .8rem; color: #fff;
+      opacity: 0;
+      transform: scale(.7);
+      transition: all .2s ease;
+    }
+    .role-card:hover .role-card-arrow,
+    .role-card.selected .role-card-arrow {
+      opacity: 1; transform: scale(1);
+    }
+
+    /* Login panel */
+    .login-panel {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 24px;
+      display: none;
+    }
+    .login-panel.visible { display: block; animation: fadeUp .25s ease; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .login-panel h3 {
+      font-size: 1rem; font-weight: 700; color: #fff;
+      margin-bottom: 20px;
+    }
+
+    .demo-users-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .demo-user-btn {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px;
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: all .18s ease;
+      text-align: left;
+      display: flex; align-items: center; gap: 12px;
+      font-family: 'Inter', sans-serif;
+    }
+    .demo-user-btn:hover {
+      background: rgba(255,255,255,.1);
+      border-color: rgba(255,255,255,.2);
+      transform: translateY(-1px);
+    }
+    .demo-user-btn.active {
+      border-color: var(--accent-color);
+      background: rgba(var(--accent-rgb), .12);
+    }
+
+    .demo-avatar {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: .85rem; color: #fff;
+      flex-shrink: 0;
+    }
+
+    .demo-user-name  { font-size: .85rem; font-weight: 600; color: #fff; margin-bottom: 2px; }
+    .demo-user-meta  { font-size: .74rem; color: rgba(255,255,255,.45); }
+
+    .login-cta {
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+
+    .btn-login {
+      flex: 1;
+      min-width: 180px;
+      padding: 13px 24px;
+      border-radius: 10px;
+      font-size: .9rem;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      font-family: 'Inter', sans-serif;
+      transition: all .18s ease;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-login:disabled { opacity: .4; cursor: not-allowed; }
+
+    .or-divider {
+      font-size: .78rem; color: rgba(255,255,255,.3);
+      white-space: nowrap;
+    }
+
+    /* Footer */
+    .login-footer {
+      text-align: center;
+      font-size: .75rem; color: rgba(255,255,255,.25);
+    }
+    .login-footer a { color: rgba(255,255,255,.4); }
+
+    /* Selection badge on role card */
+    .selected-badge {
+      position: absolute; top: 14px; right: 14px;
+      font-size: .7rem; font-weight: 700;
+      background: var(--accent-color);
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 99px;
+      display: none;
+    }
+    .role-card.selected .selected-badge { display: block; }
+
+    @media (max-width: 768px) {
+      .roles-grid { grid-template-columns: 1fr; }
+      .hero-text h1 { font-size: 1.6rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="bg-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <div class="login-container">
+    <!-- Brand -->
+    <div class="brand">
+      <div class="brand-mark">J</div>
+      <div>
+        <div class="brand-name">Janaa</div>
+        <div class="brand-sub">Global Payroll Platform</div>
+      </div>
+    </div>
+
+    <!-- Hero -->
+    <div class="hero-text">
+      <h1>One platform,<br>three dashboards.</h1>
+      <p>Payroll operations, employer management, and employee self-service — built for India and the Philippines.</p>
+      <div class="hero-countries">
+        <div class="country-chip">🇮🇳 India</div>
+        <div class="country-chip">🇵🇭 Philippines</div>
+      </div>
+    </div>
+
+    <!-- Role Selector -->
+    <div class="roles-grid" id="rolesGrid">
+
+      <!-- Internal Ops -->
+      <div class="role-card" data-role="ops"
+           style="--accent-color:#1B4FFF; --accent-rgb:27,79,255"
+           onclick="selectRole('ops')">
+        <span class="selected-badge">Selected ✓</span>
+        <div class="role-icon" style="background:rgba(27,79,255,.15)">⚙️</div>
+        <div class="role-name">Internal Ops</div>
+        <div class="role-desc">Janaa team portal to run payroll on time, manage exceptions, and track compliance.</div>
+        <div class="role-features">
+          <div class="role-feature"><span class="feature-dot"></span>Work queue & payroll runs</div>
+          <div class="role-feature"><span class="feature-dot"></span>Exceptions inbox</div>
+          <div class="role-feature"><span class="feature-dot"></span>Compliance task tracker</div>
+          <div class="role-feature"><span class="feature-dot"></span>Payment failure alerts</div>
+        </div>
+        <div class="role-card-arrow">→</div>
+      </div>
+
+      <!-- Client Admin -->
+      <div class="role-card" data-role="admin"
+           style="--accent-color:#10B981; --accent-rgb:16,185,129"
+           onclick="selectRole('admin')">
+        <span class="selected-badge">Selected ✓</span>
+        <div class="role-icon" style="background:rgba(16,185,129,.15)">🏢</div>
+        <div class="role-name">Client Admin</div>
+        <div class="role-desc">Employer portal to review payroll costs, fix blockers, approve runs, and export reports.</div>
+        <div class="role-features">
+          <div class="role-feature"><span class="feature-dot"></span>Cost summary & headcount</div>
+          <div class="role-feature"><span class="feature-dot"></span>Payroll approval workflow</div>
+          <div class="role-feature"><span class="feature-dot"></span>Payroll register export</div>
+          <div class="role-feature"><span class="feature-dot"></span>Exception resolution</div>
+        </div>
+        <div class="role-card-arrow">→</div>
+      </div>
+
+      <!-- Employee -->
+      <div class="role-card" data-role="employee"
+           style="--accent-color:#8B5CF6; --accent-rgb:139,92,246"
+           onclick="selectRole('employee')">
+        <span class="selected-badge">Selected ✓</span>
+        <div class="role-icon" style="background:rgba(139,92,246,.15)">👤</div>
+        <div class="role-name">Employee</div>
+        <div class="role-desc">Self-serve portal to check pay status, view payslips, and update bank details.</div>
+        <div class="role-features">
+          <div class="role-feature"><span class="feature-dot"></span>Pay status tracker</div>
+          <div class="role-feature"><span class="feature-dot"></span>Payslip download</div>
+          <div class="role-feature"><span class="feature-dot"></span>Bank account update</div>
+          <div class="role-feature"><span class="feature-dot"></span>Document uploads</div>
+        </div>
+        <div class="role-card-arrow">→</div>
+      </div>
+    </div>
+
+    <!-- Login Panel (shown after role selection) -->
+    <div class="login-panel" id="loginPanel">
+      <h3 id="loginPanelTitle">Choose a demo user</h3>
+      <div class="demo-users-grid" id="demoUsersGrid"></div>
+      <div class="login-cta">
+        <button class="btn-login" id="enterBtn"
+                style="background:#1B4FFF; color:#fff"
+                onclick="enterDashboard()" disabled>
+          <span>Enter Dashboard</span>
+          <span>→</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="login-footer">
+      Janaa Global Payroll &bull; MVP Demo &bull; India 🇮🇳 &bull; Philippines 🇵🇭 &bull;
+      <a href="#">app.getjanaa.com</a>
+    </div>
+  </div>
+
+  <script>
+    const DEMO_USERS = {
+      ops: [
+        { id: 'OPS001', name: 'Neha Singh',  email: 'neha.singh@getjanaa.com',    role: 'ops', country: 'India',       avatar: '#1B4FFF', company: 'Janaa',       position: 'Payroll Ops Specialist' },
+        { id: 'OPS002', name: 'Mark Aquino', email: 'mark.aquino@getjanaa.com',   role: 'ops', country: 'Philippines', avatar: '#1340CC', company: 'Janaa',       position: 'Payroll Ops Specialist' },
+      ],
+      admin: [
+        { id: 'ADM001', name: 'Ravi Kumar',    email: 'ravi.kumar@techcorp.in',       role: 'admin', country: 'India',       avatar: '#10B981', company: 'TechCorp India', position: 'HR & Finance Director' },
+        { id: 'ADM002', name: 'Jennifer Tan',  email: 'jennifer.tan@globalops.ph',    role: 'admin', country: 'Philippines', avatar: '#059669', company: 'GlobalOps PH',  position: 'HR Director' },
+      ],
+      employee: [
+        { id: 'EMP001', name: 'Priya Sharma',      email: 'priya.sharma@techcorp.in',    role: 'employee', country: 'India',       avatar: '#8B5CF6', company: 'TechCorp India', position: 'Senior Software Engineer' },
+        { id: 'EMP002', name: 'Rahul Mehta',        email: 'rahul.mehta@techcorp.in',     role: 'employee', country: 'India',       avatar: '#7C3AED', company: 'TechCorp India', position: 'Product Manager' },
+        { id: 'EMP006', name: 'Maria Santos',       email: 'maria.santos@globalops.ph',   role: 'employee', country: 'Philippines', avatar: '#6D28D9', company: 'GlobalOps PH',  position: 'Operations Lead' },
+        { id: 'EMP009', name: 'Carlos Dela Rosa',   email: 'carlos.dr@globalops.ph',      role: 'employee', country: 'Philippines', avatar: '#5B21B6', company: 'GlobalOps PH',  position: 'Backend Developer' },
+      ]
+    };
+
+    const ROLE_CONFIG = {
+      ops:      { accent: '#1B4FFF', rgb: '27,79,255',    dest: 'ops.html',   label: 'Internal Ops' },
+      admin:    { accent: '#10B981', rgb: '16,185,129',   dest: 'admin.html', label: 'Client Admin'  },
+      employee: { accent: '#8B5CF6', rgb: '139,92,246',   dest: 'me.html',    label: 'Employee'      },
+    };
+
+    let selectedRole = null;
+    let selectedUser = null;
+
+    function initials(name) {
+      return name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+    }
+
+    function selectRole(role) {
+      selectedRole = role;
+      selectedUser = null;
+
+      // Update card styles
+      document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
+      document.querySelector(`[data-role="${role}"]`).classList.add('selected');
+
+      // Show panel
+      const panel   = document.getElementById('loginPanel');
+      const title   = document.getElementById('loginPanelTitle');
+      const grid    = document.getElementById('demoUsersGrid');
+      const enterBtn = document.getElementById('enterBtn');
+      const cfg = ROLE_CONFIG[role];
+
+      title.textContent = `Choose a demo ${cfg.label} user`;
+      enterBtn.style.background = cfg.accent;
+      enterBtn.disabled = true;
+
+      const users = DEMO_USERS[role];
+      grid.innerHTML = users.map(u => `
+        <button class="demo-user-btn" data-uid="${u.id}" onclick="selectUser('${u.id}', '${role}')"
+                style="--accent-color:${cfg.accent}; --accent-rgb:${cfg.rgb}">
+          <div class="demo-avatar" style="background:${u.avatar}">${initials(u.name)}</div>
+          <div>
+            <div class="demo-user-name">${u.name}</div>
+            <div class="demo-user-meta">${u.position} &bull; ${u.country === 'India' ? '🇮🇳' : '🇵🇭'} ${u.country}</div>
+            <div class="demo-user-meta">${u.company}</div>
+          </div>
+        </button>
+      `).join('');
+
+      panel.classList.add('visible');
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function selectUser(uid, role) {
+      const users = DEMO_USERS[role];
+      selectedUser = users.find(u => u.id === uid);
+
+      document.querySelectorAll('.demo-user-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector(`[data-uid="${uid}"]`).classList.add('active');
+
+      document.getElementById('enterBtn').disabled = false;
+    }
+
+    function enterDashboard() {
+      if (!selectedUser) return;
+      // Save to localStorage
+      const session = {
+        id:        selectedUser.id,
+        name:      selectedUser.name,
+        email:     selectedUser.email,
+        role:      selectedUser.role,
+        country:   selectedUser.country,
+        company:   selectedUser.company,
+        position:  selectedUser.position,
+        client_id: selectedUser.id.startsWith('ADM') ?
+          (selectedUser.company === 'TechCorp India' ? 'CLIENT01' : 'CLIENT02') :
+          (selectedUser.country === 'India' ? 'CLIENT01' : 'CLIENT02')
+      };
+      localStorage.setItem('janaa_user', JSON.stringify(session));
+      const btn = document.getElementById('enterBtn');
+      btn.innerHTML = '<span>Loading…</span>';
+      btn.disabled = true;
+      setTimeout(() => {
+        window.location.href = ROLE_CONFIG[selectedUser.role].dest;
+      }, 600);
+    }
+
+    // Auto-redirect if already logged in
+    const existing = localStorage.getItem('janaa_user');
+    if (existing) {
+      try {
+        const u = JSON.parse(existing);
+        const dest = ROLE_CONFIG[u.role]?.dest;
+        if (dest) window.location.href = dest;
+      } catch(e) {}
+    }
+  </script>
+</body>
+</html>
